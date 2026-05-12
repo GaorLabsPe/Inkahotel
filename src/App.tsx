@@ -47,10 +47,12 @@ import {
   Instagram,
   MapPin,
   Phone,
-  MessageCircle
+  MessageCircle,
+  Edit
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Room, RoomStatus, Guest, Product, SaleRecord, OrderItem, Payment, Reservation, User, Shift, RoomType, HotelInfo } from './types';
+import { Room, RoomStatus, Guest, Product, SaleRecord, OrderItem, Payment, Reservation, User, Shift, ShiftClosure, RoomType, HotelInfo } from './types';
+import { supabase } from './lib/supabase';
 
 // Initial Mock Data
 const INITIAL_HOTEL_INFO: HotelInfo = {
@@ -134,13 +136,158 @@ export default function App() {
     }
   };
 
+  const [isCloseShiftOpen, setIsCloseShiftOpen] = useState(false);
   const [editingReservation, setEditingReservation] = useState<Reservation | null>(null);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'rooms' | 'inventory' | 'reports' | 'config'>('rooms');
   const [rooms, setRooms] = useState<Room[]>(INITIAL_ROOMS);
   const [roomTypes, setRoomTypes] = useState<RoomType[]>(INITIAL_ROOM_TYPES);
   const [hotelInfo, setHotelInfo] = useState<HotelInfo>(INITIAL_HOTEL_INFO);
+  const [users, setUsers] = useState<User[]>(INITIAL_USERS);
   const [guests, setGuests] = useState<Guest[]>(INITIAL_GUESTS);
   const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
+  const [sales, setSales] = useState<SaleRecord[]>([]);
+
+  const handleCloseShift = async (actualCash: number, notes: string) => {
+    if (!currentShift) return;
+
+    const expectedEndingCash = currentShift.startingCash + currentShift.totalSales;
+    const discrepancy = actualCash - expectedEndingCash;
+
+    const closure: ShiftClosure = {
+      id: Math.random().toString(36).substr(2, 9),
+      shiftId: currentShift.id,
+      userId: currentUser?.id || '',
+      closingTime: new Date().toISOString(),
+      startingCash: currentShift.startingCash,
+      totalSales: currentShift.totalSales,
+      expectedEndingCash,
+      actualEndingCash: actualCash,
+      discrepancy,
+      notes
+    };
+
+    const { error } = await supabase.from('shift_closures').insert(closure);
+    if (error) { alert('Error cerrando turno: ' + error.message); return; }
+
+    // Close the shift locally and session
+    setCurrentShift(null);
+    setCurrentUser(null);
+    setIsCloseShiftOpen(false);
+  };
+
+  const [actualCash, setActualCash] = useState<string>('0');
+  const [shiftNotes, setShiftNotes] = useState<string>('');
+  
+  const ShiftSummaryModal = () => {
+    if (!currentShift) return null;
+    
+    const shiftSales = sales.filter(s => s.timestamp >= currentShift.startTime);
+    const summaryByMethod = shiftSales.reduce((acc, sale) => {
+      acc[sale.method] = (acc[sale.method] || 0) + sale.amount;
+      return acc;
+    }, {} as Record<string, number>);
+
+    return (
+      <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+        <div className="bg-white rounded-3xl p-8 w-full max-w-lg shadow-2xl">
+          <h2 className="text-2xl font-black uppercase tracking-tighter mb-6">Resumen del Turno</h2>
+          
+          <div className="space-y-4 mb-6">
+            {Object.entries(summaryByMethod).map(([method, amount]) => (
+              <div key={method} className="flex justify-between items-center p-3 bg-slate-50 rounded-xl">
+                <span className="font-bold text-slate-600">{method}</span>
+                <span className="font-black text-slate-900">S/ {amount.toFixed(2)}</span>
+              </div>
+            ))}
+            <div className="flex justify-between items-center p-3 bg-slate-900 text-white rounded-xl">
+              <span className="font-bold">Total Ventas</span>
+              <span className="font-black">S/ {currentShift.totalSales.toFixed(2)}</span>
+            </div>
+          </div>
+
+          <div className="mb-6">
+            <label className="block text-xs font-black text-slate-500 uppercase mb-2">Arqueo de Efectivo</label>
+            <input 
+              type="number" 
+              value={actualCash}
+              onChange={(e) => setActualCash(e.target.value)}
+              className="w-full text-lg font-black p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-red-500"
+              placeholder="Monto en efectivo real"
+            />
+          </div>
+
+          <div className="flex gap-3">
+             <button 
+                onClick={() => {
+                  setCurrentUser(null);
+                  setIsCloseShiftOpen(false);
+                }}
+                className="flex-1 py-4 rounded-xl font-bold bg-slate-100 hover:bg-slate-200"
+              >
+                Solo Salir
+              </button>
+              
+              {currentUser?.role === 'admin' && (
+                <button 
+                  onClick={() => {
+                    handleCloseShift(parseFloat(actualCash), shiftNotes);
+                  }}
+                  className="flex-1 py-4 rounded-xl font-bold bg-red-600 text-white"
+                >
+                  Cerrar y Contabilizar
+                </button>
+              )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Supabase Data Sync
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        // Fetch Hotel Info
+        const { data: hotelData } = await supabase.from('hotel_info').select('*').single();
+        if (hotelData) setHotelInfo(hotelData);
+
+        // Fetch Users
+        const { data: usersData } = await supabase.from('users').select('*');
+        if (usersData) setUsers(usersData);
+
+        // Fetch Room Types
+        const { data: rtData } = await supabase.from('room_types').select('*');
+        if (rtData) setRoomTypes(rtData);
+
+        // Fetch Rooms
+        const { data: roomsData } = await supabase.from('rooms').select('*');
+        if (roomsData) setRooms(roomsData);
+
+        // Fetch Products
+        const { data: productsData } = await supabase.from('products').select('*');
+        if (productsData) setProducts(productsData);
+
+        // Fetch Guests
+        const { data: guestsData } = await supabase.from('guests').select('*');
+        if (guestsData) setGuests(guestsData);
+
+        // Fetch Sales
+        const { data: salesData } = await supabase.from('sales').select('*');
+        if (salesData) setSales(salesData || []);
+
+        // Fetch Reservations
+        const { data: resData } = await supabase.from('reservations').select('*');
+        if (resData) setReservations(resData);
+
+      } catch (error) {
+        console.error('Error fetching data from Supabase:', error);
+      }
+    };
+
+    if (currentUser) {
+      fetchData();
+    }
+  }, [currentUser]);
 
   const handleExportInventory = () => {
     const header = "ID,Nombre,Categoria,Costo,Precio,Stock,Ganancia\n";
@@ -158,7 +305,6 @@ export default function App() {
     link.click();
     document.body.removeChild(link);
   };
-  const [sales, setSales] = useState<SaleRecord[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>(INITIAL_RESERVATIONS);
   const [roomsViewMode, setRoomsViewMode] = useState<'grid' | 'calendar'>('grid');
   
@@ -177,6 +323,8 @@ export default function App() {
 
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [isUserModalOpen, setIsUserModalOpen] = useState(false);
+  const [editingUserLocal, setEditingUserLocal] = useState<User | null>(null);
   const [isRoomModalOpen, setIsRoomModalOpen] = useState(false);
   const [editingRoom, setEditingRoom] = useState<Room | null>(null);
   
@@ -276,7 +424,7 @@ export default function App() {
   }, [rooms, sales, reportDateRange, currentShift, reservations]);
 
   // Handlers
-  const handleCheckIn = (guestData: Partial<Guest>, finalPayments: {method: Payment['method'], amount: number}[]) => {
+  const handleCheckIn = async (guestData: Partial<Guest>, finalPayments: {method: Payment['method'], amount: number}[]) => {
     if (!selectedRoom) return;
 
     const finalRoomPrice = parseFloat(priceOverride) || selectedRoom.price || 0;
@@ -299,7 +447,6 @@ export default function App() {
       timestamp: new Date().toISOString()
     }));
 
-    // Auto-Courtesy for Suites
     if (selectedRoom.type === 'Suite') {
       const wine = products.find(p => p.name.toLowerCase().includes('vino'));
       if (wine) {
@@ -338,32 +485,46 @@ export default function App() {
       priceChangeReason: checkInPriceReason || undefined
     };
 
-    setGuests([...guests, newGuest]);
-    setRooms(rooms.map(r => r.id === selectedRoom.id ? { ...r, status: 'occupied', currentGuestId: newGuest.id } : r));
-    
-    // Register sales for each payment method used
-    const newSales: SaleRecord[] = finalPayments.map(p => ({
-      id: Math.random().toString(36).substr(2, 9),
-      timestamp: new Date().toISOString(),
-      guestName: newGuest.name,
-      roomNumber: selectedRoom.number,
-      amount: p.amount,
-      method: p.method,
-      type: 'Hospedaje'
-    }));
+    // Supabase transactions
+    try {
+      const { error: guestError } = await supabase.from('guests').insert(newGuest);
+      if (guestError) throw guestError;
 
-    setSales([...sales, ...newSales]);
-    
-    // Update shift sales
-    newSales.forEach(s => updateShiftSales(s.amount));
+      const { error: roomError } = await supabase.from('rooms').update({ 
+        status: 'occupied', 
+        currentGuestId: newGuest.id 
+      }).eq('id', selectedRoom.id);
+      if (roomError) throw roomError;
 
-    setCurrentTicket({ guest: newGuest, room: selectedRoom });
-    setIsCheckInOpen(false);
-    setCheckInCart([]);
-    setSplitPayments([]);
-    setIsSplitMode(false);
-    setIsTicketOpen(true);
-    setPriceOverride('');
+      const newSales: SaleRecord[] = finalPayments.map(p => ({
+        id: Math.random().toString(36).substr(2, 9),
+        timestamp: new Date().toISOString(),
+        guestName: newGuest.name,
+        roomNumber: selectedRoom.number,
+        amount: p.amount,
+        method: p.method,
+        type: 'Hospedaje'
+      }));
+
+      const { error: salesError } = await supabase.from('sales').insert(newSales);
+      if (salesError) throw salesError;
+
+      // Update Local State
+      setGuests([...guests, newGuest]);
+      setRooms(rooms.map(r => r.id === selectedRoom.id ? { ...r, status: 'occupied', currentGuestId: newGuest.id } : r));
+      setSales([...sales, ...newSales]);
+      newSales.forEach(s => updateShiftSales(s.amount));
+
+      setCurrentTicket({ guest: newGuest, room: selectedRoom });
+      setIsCheckInOpen(false);
+      setCheckInCart([]);
+      setSplitPayments([]);
+      setIsSplitMode(false);
+      setIsTicketOpen(true);
+      setPriceOverride('');
+    } catch (err: any) {
+      alert('Error en Check-In (Supabase): ' + err.message);
+    }
   };
 
   const updateCheckInCart = (productId: string, delta: number, isCourtesy: boolean = false) => {
@@ -418,27 +579,36 @@ export default function App() {
     setIsCheckInOpen(true);
   };
 
-  const handleUpdateReservation = (resData: Omit<Reservation, 'id'>) => {
+  const handleUpdateReservation = async (resData: Omit<Reservation, 'id'>) => {
+    let newRes: Reservation;
     if (editingReservation) {
-      setReservations(reservations.map(r => r.id === editingReservation.id ? { ...resData, id: r.id } : r));
+      newRes = { ...resData, id: editingReservation.id };
+      const { error } = await supabase.from('reservations').upsert(newRes);
+      if (error) { alert('Error Supabase: ' + error.message); return; }
+      setReservations(reservations.map(r => r.id === editingReservation.id ? newRes : r));
     } else {
-      const newRes: Reservation = {
+      newRes = {
         ...resData,
         id: Math.random().toString(36).substr(2, 9)
       };
+      const { error } = await supabase.from('reservations').insert(newRes);
+      if (error) { alert('Error Supabase: ' + error.message); return; }
       setReservations([...reservations, newRes]);
     }
     setIsReservationModalOpen(false);
     setEditingReservation(null);
   };
 
-  const handleCancelReservation = (id: string) => {
+  const handleCancelReservation = async (id: string) => {
+    if (!confirm('¿Cancelar reserva?')) return;
+    const { error } = await supabase.from('reservations').delete().eq('id', id);
+    if (error) { alert('Error Supabase: ' + error.message); return; }
     setReservations(reservations.filter(r => r.id !== id));
     setIsReservationModalOpen(false);
     setEditingReservation(null);
   };
 
-  const handleProcessOrder = (payNow: boolean, finalPayments: {method: Payment['method'], amount: number}[]) => {
+  const handleProcessOrder = async (payNow: boolean, finalPayments: {method: Payment['method'], amount: number}[]) => {
     if (shopCart.length === 0) return;
 
     if (!payNow && !selectedRoom) {
@@ -469,64 +639,78 @@ export default function App() {
       timestamp: new Date().toISOString()
     })) : [];
 
-    if (guest && selectedRoom) {
-      const updatedGuest = {
-        ...guest,
-        orders: [...guest.orders, ...newOrderItems],
-        payments: [...guest.payments, ...paymentRecords],
-        totalExpected: payNow ? guest.totalExpected : guest.totalExpected + totalAmount
-      };
-      setGuests(guests.map(g => g.id === guest.id ? updatedGuest : g));
-      
-      if (payNow) {
+    try {
+      if (guest && selectedRoom) {
+        const updatedGuest = {
+          ...guest,
+          orders: [...guest.orders, ...newOrderItems],
+          payments: [...guest.payments, ...paymentRecords],
+          totalExpected: payNow ? guest.totalExpected : guest.totalExpected + totalAmount
+        };
+        
+        const { error: guestError } = await supabase.from('guests').upsert(updatedGuest);
+        if (guestError) throw guestError;
+
+        setGuests(guests.map(g => g.id === guest.id ? updatedGuest : g));
+        
+        if (payNow) {
+          const newSales: SaleRecord[] = finalPayments.map(p => ({
+            id: Math.random().toString(36).substr(2, 9),
+            timestamp: new Date().toISOString(),
+            guestName: guest.name,
+            roomNumber: selectedRoom.number,
+            amount: p.amount,
+            method: p.method,
+            type: 'Producto'
+          }));
+          
+          const { error: salesError } = await supabase.from('sales').insert(newSales);
+          if (salesError) throw salesError;
+
+          setSales([...sales, ...newSales]);
+          newSales.forEach(s => updateShiftSales(s.amount));
+          
+          setCurrentTicket({ 
+            guest: { ...updatedGuest, orders: newOrderItems, payments: paymentRecords }, 
+            room: selectedRoom 
+          });
+          setIsTicketOpen(true);
+        }
+      } else {
         const newSales: SaleRecord[] = finalPayments.map(p => ({
           id: Math.random().toString(36).substr(2, 9),
           timestamp: new Date().toISOString(),
-          guestName: guest.name,
-          roomNumber: selectedRoom.number,
+          guestName: 'VENTA DIRECTA',
+          roomNumber: 'N/A',
           amount: p.amount,
           method: p.method,
-          type: 'Producto'
+          type: 'General'
         }));
+        
+        const { error: salesError } = await supabase.from('sales').insert(newSales);
+        if (salesError) throw salesError;
+
         setSales([...sales, ...newSales]);
         newSales.forEach(s => updateShiftSales(s.amount));
         
-        setCurrentTicket({ 
-          guest: { ...updatedGuest, orders: newOrderItems, payments: paymentRecords }, 
-          room: selectedRoom 
+        setCurrentTicket({
+          guest: { 
+            id: 'SALE', name: 'VENTA DIRECTA', documentType: 'DNI', documentNumber: '00000000', 
+            roomId: 'SALE', checkIn: new Date().toISOString(), orders: newOrderItems, 
+            payments: paymentRecords, totalExpected: totalAmount 
+          },
+          room: { id: 'SALE', number: 'N/A', floor: 0, type: 'Simple', price: 0, status: 'available' }
         });
         setIsTicketOpen(true);
       }
-    } else {
-      // Direct Sale to Public
-      const newSales: SaleRecord[] = finalPayments.map(p => ({
-        id: Math.random().toString(36).substr(2, 9),
-        timestamp: new Date().toISOString(),
-        guestName: 'VENTA DIRECTA',
-        roomNumber: 'N/A',
-        amount: p.amount,
-        method: p.method,
-        type: 'General'
-      }));
-      setSales([...sales, ...newSales]);
-      newSales.forEach(s => updateShiftSales(s.amount));
-      
-      // Temporary Guest and Room for Ticket
-      setCurrentTicket({
-        guest: { 
-          id: 'SALE', name: 'VENTA DIRECTA', documentType: 'DNI', documentNumber: '00000000', 
-          roomId: 'SALE', checkIn: new Date().toISOString(), orders: newOrderItems, 
-          payments: paymentRecords, totalExpected: totalAmount 
-        },
-        room: { id: 'SALE', number: 'N/A', floor: 0, type: 'Simple', price: 0, status: 'available' }
-      });
-      setIsTicketOpen(true);
-    }
 
-    setIsOrderOpen(false);
-    setShopCart([]);
-    setSplitPayments([]);
-    setIsSplitMode(false);
+      setIsOrderOpen(false);
+      setShopCart([]);
+      setSplitPayments([]);
+      setIsSplitMode(false);
+    } catch (err: any) {
+      alert('Error en Venta (Supabase): ' + err.message);
+    }
   };
 
   const updateShopCart = (productId: string, delta: number, isCourtesy: boolean = false) => {
@@ -542,69 +726,116 @@ export default function App() {
     });
   };
 
-  const handleSaveProduct = (productData: Omit<Product, 'id'>) => {
+  const handleSaveProduct = async (productData: Omit<Product, 'id'>) => {
+    let newProduct: Product;
     if (editingProduct) {
-      setProducts(products.map(p => p.id === editingProduct.id ? { ...productData, id: p.id } : p));
+      newProduct = { ...productData, id: editingProduct.id };
+      const { error } = await supabase.from('products').upsert(newProduct);
+      if (error) { alert('Error Supabase: ' + error.message); return; }
+      setProducts(products.map(p => p.id === editingProduct.id ? newProduct : p));
     } else {
-      const newProduct: Product = {
+      newProduct = {
         ...productData,
         id: Math.random().toString(36).substr(2, 9)
       };
+      const { error } = await supabase.from('products').insert(newProduct);
+      if (error) { alert('Error Supabase: ' + error.message); return; }
       setProducts([...products, newProduct]);
     }
     setIsProductModalOpen(false);
     setEditingProduct(null);
   };
 
-  const handleDeleteProduct = (productId: string) => {
+  const handleDeleteProduct = async (productId: string) => {
+    if (!confirm('¿Eliminar producto?')) return;
+    const { error } = await supabase.from('products').delete().eq('id', productId);
+    if (error) { alert('Error Supabase: ' + error.message); return; }
     setProducts(products.filter(p => p.id !== productId));
   };
   
-  const handleSaveRoom = (roomData: Omit<Room, 'id'>) => {
+  const handleSaveRoom = async (roomData: Omit<Room, 'id'>) => {
+    let newRoom: Room;
     if (editingRoom) {
-      setRooms(rooms.map(r => r.id === editingRoom.id ? { ...roomData, id: r.id } : r));
+      newRoom = { ...roomData, id: editingRoom.id };
+      const { error } = await supabase.from('rooms').upsert(newRoom);
+      if (error) { alert('Error Supabase: ' + error.message); return; }
+      setRooms(rooms.map(r => r.id === editingRoom.id ? newRoom : r));
     } else {
-      const newRoom: Room = {
+      newRoom = {
         ...roomData,
         id: Math.random().toString(36).substr(2, 9)
       };
+      const { error } = await supabase.from('rooms').insert(newRoom);
+      if (error) { alert('Error Supabase: ' + error.message); return; }
       setRooms([...rooms, newRoom]);
     }
     setIsRoomModalOpen(false);
     setEditingRoom(null);
   };
 
-  const handleSaveRoomType = (typeData: Omit<RoomType, 'id'>) => {
+  const handleSaveRoomType = async (typeData: Omit<RoomType, 'id'>) => {
+    let newType: RoomType;
     if (editingRoomType) {
-      setRoomTypes(roomTypes.map(rt => rt.id === editingRoomType.id ? { ...typeData, id: rt.id } : rt));
-      // Update rooms that have this type name if name changed? 
-      // For simplicity let's assume names are unique and used as identifiers for now.
+      newType = { ...typeData, id: editingRoomType.id };
+      const { error } = await supabase.from('room_types').upsert(newType);
+      if (error) { alert('Error Supabase: ' + error.message); return; }
+      setRoomTypes(roomTypes.map(rt => rt.id === editingRoomType.id ? newType : rt));
     } else {
-      const newType: RoomType = {
+      newType = {
         ...typeData,
         id: Math.random().toString(36).substr(2, 9)
       };
+      const { error } = await supabase.from('room_types').insert(newType);
+      if (error) { alert('Error Supabase: ' + error.message); return; }
       setRoomTypes([...roomTypes, newType]);
     }
     setIsRoomTypeModalOpen(false);
     setEditingRoomType(null);
   };
 
-  const handleDeleteRoomType = (id: string) => {
+  const handleDeleteRoomType = async (id: string) => {
+    if (!confirm('¿Eliminar tipo de habitación?')) return;
+    const { error } = await supabase.from('room_types').delete().eq('id', id);
+    if (error) { alert('Error Supabase: ' + error.message); return; }
     setRoomTypes(roomTypes.filter(rt => rt.id !== id));
   };
 
-  const handleToggleRoomStatus = (roomId: string) => {
-    setRooms(rooms.map(r => {
-      if (r.id === roomId) {
-        return { ...r, status: r.status === 'disabled' ? 'available' : 'disabled' };
-      }
-      return r;
-    }));
+  const handleToggleRoomStatus = async (roomId: string) => {
+    const room = rooms.find(r => r.id === roomId);
+    if (!room) return;
+    const newStatus = room.status === 'disabled' ? 'available' : 'disabled';
+    const { error } = await supabase.from('rooms').update({ status: newStatus }).eq('id', roomId);
+    if (error) { alert('Error Supabase: ' + error.message); return; }
+    setRooms(rooms.map(r => r.id === roomId ? { ...r, status: newStatus } : r));
   };
 
-  const handleDeleteRoom = (roomId: string) => {
+  const handleDeleteRoom = async (roomId: string) => {
+    if (!confirm('¿Eliminar habitación?')) return;
+    const { error } = await supabase.from('rooms').delete().eq('id', roomId);
+    if (error) { alert('Error Supabase: ' + error.message); return; }
     setRooms(rooms.filter(r => r.id !== roomId));
+  };
+
+  const handleSaveUser = async (userData: User) => {
+    const { error } = await supabase.from('users').upsert(userData);
+    if (error) { alert('Error Supabase: ' + error.message); return; }
+    if (users.find(u => u.id === userData.id)) {
+      setUsers(users.map(u => u.id === userData.id ? userData : u));
+    } else {
+      setUsers([...users, userData]);
+    }
+  };
+
+  const handleDeleteUser = async (userId: string) => {
+    if (userId === currentUser?.id) {
+      alert('No puedes eliminar tu propio usuario mientras estás en sesión.');
+      return;
+    }
+    if (confirm('¿Está seguro de eliminar este usuario?')) {
+      const { error } = await supabase.from('users').delete().eq('id', userId);
+      if (error) { alert('Error Supabase: ' + error.message); return; }
+      setUsers(users.filter(u => u.id !== userId));
+    }
   };
 
   const handleCheckOut = (roomId: string) => {
@@ -625,7 +856,7 @@ export default function App() {
     }
   };
 
-  const finalizeCheckout = (roomId: string, guest: Guest, room: Room, finalPayments: { amount: number, method: Payment['method'] }[] = []) => {
+  const finalizeCheckout = async (roomId: string, guest: Guest, room: Room, finalPayments: { amount: number, method: Payment['method'] }[] = []) => {
     const checkoutTime = new Date().toISOString();
     const paymentRecords: Payment[] = finalPayments.map(p => ({
       amount: p.amount,
@@ -649,20 +880,41 @@ export default function App() {
       type: 'Hospedaje'
     }));
 
-    setSales([...sales, ...newSales]);
-    newSales.forEach(s => updateShiftSales(s.amount));
-    setGuests(guests.map(g => g.id === guest.id ? updatedGuest : g));
-    setRooms(rooms.map(r => r.id === roomId ? { ...r, status: 'dirty', currentGuestId: undefined } : r));
-    
-    setCurrentTicket({ 
-      guest: { ...updatedGuest, orders: [], payments: paymentRecords }, 
-      room 
-    });
-    setIsTicketOpen(true);
-    setIsCheckoutPaymentOpen(false);
-    setPendingCheckoutData(null);
-    setSplitPayments([]);
-    setIsSplitMode(false);
+    try {
+      // Transactional updates in Supabase
+      const { error: guestError } = await supabase.from('guests').upsert(updatedGuest);
+      if (guestError) throw guestError;
+
+      const { error: roomError } = await supabase.from('rooms').update({ 
+        status: 'dirty', 
+        currentGuestId: null 
+      }).eq('id', roomId);
+      if (roomError) throw roomError;
+
+      if (newSales.length > 0) {
+        const { error: salesError } = await supabase.from('sales').insert(newSales);
+        if (salesError) throw salesError;
+      }
+
+      setSales([...sales, ...newSales]);
+      if (newSales.length > 0) {
+        newSales.forEach(s => updateShiftSales(s.amount));
+      }
+      setGuests(guests.map(g => g.id === guest.id ? updatedGuest : g));
+      setRooms(rooms.map(r => r.id === roomId ? { ...r, status: 'dirty', currentGuestId: undefined } : r));
+      
+      setCurrentTicket({ 
+        guest: { ...updatedGuest, orders: [], payments: paymentRecords }, 
+        room 
+      });
+      setIsTicketOpen(true);
+      setIsCheckoutPaymentOpen(false);
+      setPendingCheckoutData(null);
+      setSplitPayments([]);
+      setIsSplitMode(false);
+    } catch (err: any) {
+      alert('Error en Check-Out (Supabase): ' + err.message);
+    }
   };
 
   const handleLogout = () => {
@@ -671,7 +923,7 @@ export default function App() {
   };
 
   if (!currentUser) {
-    return <LoginPortal hotelInfo={hotelInfo} onLogin={(user) => {
+    return <LoginPortal hotelInfo={hotelInfo} users={users} onLogin={(user) => {
       setCurrentUser(user);
       setCurrentShift({
         id: Math.random().toString(36).substr(2, 9),
@@ -724,7 +976,7 @@ export default function App() {
           </div>
           
           <button 
-            onClick={handleLogout}
+            onClick={() => setIsCloseShiftOpen(true)}
             className="w-12 h-12 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-400 hover:text-red-600 hover:bg-red-50 hover:border-red-100 transition-all group"
             title="Cerrar Turno"
           >
@@ -734,6 +986,7 @@ export default function App() {
       </header>
 
       {/* Main Content Area */}
+      {isCloseShiftOpen && <ShiftSummaryModal />}
       <main className="flex-1 flex overflow-hidden">
         {/* Left Sidebar (Optional in Theme but kept for your existing functionality, styled to theme) */}
         <nav className="w-16 lg:w-64 bg-white border-r border-slate-200 flex flex-col shrink-0 lg:hidden">
@@ -1342,6 +1595,82 @@ export default function App() {
                           <Smartphone size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
                         </div>
                       </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Section: User Management (Admin Only) */}
+                {currentUser?.role === 'admin' && (
+                  <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
+                    <div className="p-6 bg-slate-900 flex justify-between items-center">
+                      <div>
+                        <h3 className="font-black text-sm uppercase tracking-[0.2em] text-white">Gestión de Usuarios y Personal</h3>
+                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Configura los accesos de tus recepcionistas</p>
+                      </div>
+                      <button 
+                        onClick={() => {
+                          setEditingUserLocal(null);
+                          setIsUserModalOpen(true);
+                        }}
+                        className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2"
+                      >
+                        <UserPlus size={14} /> Nuevo Usuario
+                      </button>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left">
+                        <thead>
+                          <tr className="border-b border-slate-100 italic">
+                            <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Nombre del Personal</th>
+                            <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Usuario</th>
+                            <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Teléfono</th>
+                            <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Rol / Rango</th>
+                            <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Acciones</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {users.map(user => (
+                            <tr key={user.id} className="hover:bg-slate-50/50 transition-colors">
+                              <td className="px-8 py-4 font-bold text-slate-700 flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
+                                  <UserIcon size={16} />
+                                </div>
+                                {user.name}
+                              </td>
+                              <td className="px-8 py-4 text-xs font-mono text-slate-500">{user.username}</td>
+                              <td className="px-8 py-4 text-xs font-bold text-slate-600">{user.phone || '-'}</td>
+                              <td className="px-8 py-4">
+                                <span className={`px-2 py-1 rounded-md text-[9px] font-black uppercase tracking-widest ${
+                                  user.role === 'admin' ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-600'
+                                }`}>
+                                  {user.role === 'admin' ? 'Administrador' : 'Recepcionista'}
+                                </span>
+                              </td>
+                              <td className="px-8 py-4 text-right">
+                                <div className="flex justify-end gap-1">
+                                  <button 
+                                    onClick={() => {
+                                      setEditingUserLocal(user);
+                                      setIsUserModalOpen(true);
+                                    }}
+                                    className="p-2 hover:bg-slate-100 text-slate-400 hover:text-slate-900 rounded-lg transition-all"
+                                    title="Editar usuario"
+                                  >
+                                    <Edit size={16} />
+                                  </button>
+                                  <button 
+                                    onClick={() => handleDeleteUser(user.id)}
+                                    className="p-2 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg transition-all"
+                                    title="Eliminar usuario"
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 )}
@@ -2267,6 +2596,23 @@ export default function App() {
 
       {/* Modals Unified */}
       <AnimatePresence>
+        {/* User Modal (Admin HUD) */}
+        {isUserModalOpen && (
+          <div key="modal-user" className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+              <UserFormModal 
+                user={editingUserLocal} 
+                onSave={(userData) => {
+                  handleSaveUser(userData as User);
+                  setIsUserModalOpen(false);
+                  setEditingUserLocal(null);
+                }} 
+                onClose={() => { setIsUserModalOpen(false); setEditingUserLocal(null); }} 
+              />
+            </motion.div>
+          </div>
+        )}
+
         {/* Product Modal (Tienda CRUD) */}
         {isProductModalOpen && (
           <div key="modal-product" className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -3203,14 +3549,14 @@ function RoomCard({ room, guestName, onCheckIn, onShowSummary, onAddOrder, onChe
   );
 }
 
-function LoginPortal({ hotelInfo, onLogin }: { hotelInfo: HotelInfo, onLogin: (user: User) => void }) {
+function LoginPortal({ hotelInfo, users, onLogin }: { hotelInfo: HotelInfo, users: User[], onLogin: (user: User) => void }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
   const handleAccess = (e: React.FormEvent) => {
     e.preventDefault();
-    const user = INITIAL_USERS.find(u => u.username === username && u.password === password);
+    const user = users.find(u => u.username === username && u.password === password);
     
     if (!user) {
       setError('Credenciales incorrectas');
@@ -3296,6 +3642,85 @@ function LoginPortal({ hotelInfo, onLogin }: { hotelInfo: HotelInfo, onLogin: (u
           </p>
         </div>
       </motion.div>
+    </div>
+  );
+}
+
+function UserFormModal({ user, onSave, onClose }: { user: User | null, onSave: (u: Partial<User>) => void, onClose: () => void }) {
+  const [formData, setFormData] = useState<Partial<User>>(
+    user ? { ...user } : { name: '', username: '', password: '', role: 'recepcionist' }
+  );
+
+  return (
+    <div className="flex flex-col">
+      <div className="p-6 bg-slate-900 text-white flex justify-between items-center">
+        <div>
+           <h3 className="font-black text-xl uppercase tracking-tighter">{user ? 'Editar Personal' : 'Nuevo Personal'}</h3>
+           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Gestión de Accesos</p>
+        </div>
+        <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-lg transition-colors"><X size={20} /></button>
+      </div>
+      <div className="p-8 space-y-4">
+        <div className="space-y-1">
+          <label className="text-[10px] font-black uppercase text-slate-400">Nombre Completo del Personal</label>
+          <input 
+            autoFocus 
+            className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-slate-900 outline-none transition-all font-bold" 
+            placeholder="Ej: Juan Pérez"
+            value={formData.name}
+            onChange={e => setFormData({...formData, name: e.target.value})}
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-1">
+            <label className="text-[10px] font-black uppercase text-slate-400">Usuario (Login)</label>
+            <input 
+              className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-slate-900 outline-none transition-all font-bold" 
+              placeholder="juanp"
+              value={formData.username}
+              onChange={e => setFormData({...formData, username: e.target.value})}
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] font-black uppercase text-slate-400">Contraseña</label>
+            <input 
+              type="password"
+              className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-slate-900 outline-none transition-all font-bold" 
+              placeholder="••••••••"
+              value={formData.password}
+              onChange={e => setFormData({...formData, password: e.target.value})}
+            />
+          </div>
+        </div>
+        <div className="space-y-1">
+          <label className="text-[10px] font-black uppercase text-slate-400">Teléfono de Contacto</label>
+          <input 
+            className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-slate-900 outline-none transition-all font-bold" 
+            placeholder="Ej: 987654321"
+            value={formData.phone}
+            onChange={e => setFormData({...formData, phone: e.target.value})}
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-[10px] font-black uppercase text-slate-400">Rol del Usuario</label>
+          <select 
+            className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-slate-900 outline-none transition-all font-bold uppercase"
+            value={formData.role}
+            onChange={e => setFormData({...formData, role: e.target.value as any})}
+          >
+            <option value="recepcionist">Recepcionista</option>
+            <option value="admin">Administrador</option>
+          </select>
+        </div>
+        <div className="pt-4">
+          <button 
+            onClick={() => onSave({ ...formData, id: user?.id || Math.random().toString(36).substr(2, 9) })}
+            className="w-full py-4 bg-red-600 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-red-700 shadow-xl shadow-red-600/20 active:scale-95 transition-all"
+          >
+            {user ? 'Guardar Cambios' : 'Registrar Personal'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

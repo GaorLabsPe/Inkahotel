@@ -1,3 +1,16 @@
+export interface ShiftClosure {
+  id: string;
+  shiftId: string;
+  userId: string;
+  closingTime: string;
+  startingCash: number;
+  totalSales: number;
+  expectedEndingCash: number;
+  actualEndingCash: number;
+  discrepancy: number;
+  notes?: string;
+}
+
 export interface User {
   id: string;
   name: string;
@@ -5,6 +18,7 @@ export interface User {
   avatar?: string;
   username: string;
   password?: string;
+  phone?: string;
 }
 
 export interface Shift {
