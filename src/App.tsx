@@ -54,7 +54,7 @@ import { Room, RoomStatus, Guest, Product, SaleRecord, OrderItem, Payment, Reser
 
 // Initial Mock Data
 const INITIAL_HOTEL_INFO: HotelInfo = {
-  name: 'Sistemas de Gestión Elite',
+  name: 'Suite Estrella',
   address: 'Av. Principal 123, Lima - Perú',
   phone: '01 234 5678',
   whatsapp: '987654321',
