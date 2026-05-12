@@ -1,4 +1,17 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer, 
+  PieChart, 
+  Pie, 
+  Cell,
+  Legend
+} from 'recharts';
 import { 
   Hotel, 
   LayoutDashboard, 
@@ -25,13 +38,39 @@ import {
   Calendar,
   ChevronLeft,
   Bed,
-  User,
-  ShieldAlert
+  Star,
+  User as UserIcon,
+  ShieldAlert,
+  Building2,
+  LogIn,
+  Facebook,
+  Instagram,
+  MapPin,
+  Phone,
+  MessageCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Room, RoomStatus, Guest, Product, SaleRecord, OrderItem, Payment, Reservation } from './types';
+import { Room, RoomStatus, Guest, Product, SaleRecord, OrderItem, Payment, Reservation, User, Shift, RoomType, HotelInfo } from './types';
 
 // Initial Mock Data
+const INITIAL_HOTEL_INFO: HotelInfo = {
+  name: 'Sistemas de Gestión Elite',
+  address: 'Av. Principal 123, Lima - Perú',
+  phone: '01 234 5678',
+  whatsapp: '987654321',
+  facebook: 'facebook.com/elitegestion',
+  instagram: 'instagram.com/elitegestion',
+  tiktok: 'tiktok.com/@elitegestion'
+};
+
+const INITIAL_ROOM_TYPES: RoomType[] = [
+  { id: 'rt1', name: 'Simple', basePrice: 60, capacity: 1 },
+  { id: 'rt2', name: 'Doble', basePrice: 100, capacity: 2 },
+  { id: 'rt3', name: 'Matrimonial', basePrice: 120, capacity: 2 },
+  { id: 'rt4', name: 'Triple', basePrice: 150, capacity: 3 },
+  { id: 'rt5', name: 'Suite', basePrice: 200, capacity: 2 },
+];
+
 const INITIAL_ROOMS: Room[] = [
   { id: '1', number: '101', floor: 1, type: 'Simple', price: 60, status: 'available' },
   { id: '2', number: '102', floor: 1, type: 'Simple', price: 60, status: 'occupied', currentGuestId: 'g1' },
@@ -76,9 +115,9 @@ const INITIAL_RESERVATIONS: Reservation[] = [
 ];
 
 const INITIAL_USERS: User[] = [
-  { id: 'u1', name: 'Administrador', role: 'admin', username: 'admin' },
-  { id: 'u2', name: 'Karla Gomez', role: 'recepcionist', username: 'karla', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&h=100&fit=crop' },
-  { id: 'u3', name: 'Diego Torres', role: 'recepcionist', username: 'diego', avatar: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?w=100&h=100&fit=crop' },
+  { id: 'u1', name: 'Administrador', role: 'admin', username: 'admin', password: '123' },
+  { id: 'u2', name: 'Karla Gomez', role: 'recepcionist', username: 'karla', password: '123', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&h=100&fit=crop' },
+  { id: 'u3', name: 'Diego Torres', role: 'recepcionist', username: 'diego', password: '123', avatar: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?w=100&h=100&fit=crop' },
 ];
 
 export default function App() {
@@ -96,10 +135,29 @@ export default function App() {
   };
 
   const [editingReservation, setEditingReservation] = useState<Reservation | null>(null);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'rooms' | 'shop' | 'reports' | 'config'>('rooms');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'rooms' | 'inventory' | 'reports' | 'config'>('rooms');
   const [rooms, setRooms] = useState<Room[]>(INITIAL_ROOMS);
+  const [roomTypes, setRoomTypes] = useState<RoomType[]>(INITIAL_ROOM_TYPES);
+  const [hotelInfo, setHotelInfo] = useState<HotelInfo>(INITIAL_HOTEL_INFO);
   const [guests, setGuests] = useState<Guest[]>(INITIAL_GUESTS);
   const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
+
+  const handleExportInventory = () => {
+    const header = "ID,Nombre,Categoria,Costo,Precio,Stock,Ganancia\n";
+    const rows = products.map(p => 
+      `${p.id},"${p.name}","${p.category}",${p.cost},${p.price},${p.stock},${(p.price - p.cost).toFixed(2)}`
+    ).join("\n");
+    
+    const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `inventario_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
   const [sales, setSales] = useState<SaleRecord[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>(INITIAL_RESERVATIONS);
   const [roomsViewMode, setRoomsViewMode] = useState<'grid' | 'calendar'>('grid');
@@ -114,16 +172,51 @@ export default function App() {
   const [splitPayments, setSplitPayments] = useState<{method: Payment['method'], amount: number}[]>([]);
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
   const [currentTicket, setCurrentTicket] = useState<{guest: Guest, room: Room} | null>(null);
-  const [checkInCart, setCheckInCart] = useState<{productId: string, quantity: number}[]>([]);
+  const [checkInCart, setCheckInCart] = useState<{productId: string, quantity: number, isCourtesy?: boolean}[]>([]);
+  const [shopCart, setShopCart] = useState<{productId: string, quantity: number, isCourtesy?: boolean}[]>([]);
 
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isRoomModalOpen, setIsRoomModalOpen] = useState(false);
   const [editingRoom, setEditingRoom] = useState<Room | null>(null);
+  
+  const [isRoomTypeModalOpen, setIsRoomTypeModalOpen] = useState(false);
+  const [editingRoomType, setEditingRoomType] = useState<RoomType | null>(null);
+  
   const [reportDateRange, setReportDateRange] = useState({ start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] });
   const [isShiftFilterActive, setIsShiftFilterActive] = useState(false);
 
-  // Stats
+  const [priceOverride, setPriceOverride] = useState<string>('');
+  const [stayDays, setStayDays] = useState<number>(1);
+  const [isCorporate, setIsCorporate] = useState(false);
+  const [expectedCheckout, setExpectedCheckout] = useState<Date>(new Date());
+  const [checkInName, setCheckInName] = useState('');
+  const [checkInDocType, setCheckInDocType] = useState<'DNI' | 'RUC' | 'CE' | 'Pasaporte'>('DNI');
+  const [checkInDocNum, setCheckInDocNum] = useState('');
+  const [checkInCompany, setCheckInCompany] = useState('');
+  const [checkInCompanyRuc, setCheckInCompanyRuc] = useState('');
+  const [checkInDeposit, setCheckInDeposit] = useState(0); 
+  const [checkInPriceReason, setCheckInPriceReason] = useState('');
+
+  const calculateDefaultCheckout = (checkInTime: Date, days: number) => {
+    const checkout = new Date(checkInTime);
+    if (checkInTime.getHours() < 12) {
+      // AM: 12 hours per day/block
+      checkout.setHours(checkInTime.getHours() + (12 * days));
+    } else {
+      // PM: 12 PM next day (standard)
+      checkout.setDate(checkInTime.getDate() + days);
+      checkout.setHours(12, 0, 0, 0);
+    }
+    return checkout;
+  };
+
+  useEffect(() => {
+    if (isCheckInOpen && selectedRoom) {
+      setExpectedCheckout(calculateDefaultCheckout(new Date(), stayDays));
+    }
+  }, [isCheckInOpen, stayDays, selectedRoom]);
+
   const stats = useMemo(() => {
     const occupied = rooms.filter(r => r.status === 'occupied').length;
     const available = rooms.filter(r => r.status === 'available').length;
@@ -149,30 +242,78 @@ export default function App() {
     const shiftSales = currentShift ? sales.filter(s => s.timestamp >= currentShift.startTime) : [];
     const shiftRevenue = shiftSales.reduce((acc, s) => acc + s.amount, 0);
     
-    return { occupied, available, dirty, totalRevenue, estimatedProfit, filteredSales, shiftRevenue, shiftSales };
-  }, [rooms, sales, reportDateRange, currentShift]);
+    const corporateMap: Record<string, { company: string, ruc: string | undefined, stays: number, days: number, revenue: number }> = {};
+    
+    reservations.forEach(res => {
+      if (!res.companyName) return;
+      
+      const start = new Date(res.startDate);
+      const end = new Date(res.endDate);
+      const days = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) || 1;
+      const revenue = (res.totalPrice || 0);
+
+      if (!corporateMap[res.companyName]) {
+        corporateMap[res.companyName] = { company: res.companyName, ruc: res.companyRuc, stays: 0, days: 0, revenue: 0 };
+      }
+      corporateMap[res.companyName].stays += 1;
+      corporateMap[res.companyName].days += days;
+      corporateMap[res.companyName].revenue += revenue;
+    });
+
+    const corporateStats = Object.values(corporateMap).sort((a, b) => b.days - a.days);
+    
+    return { 
+      occupied, 
+      available, 
+      dirty, 
+      totalRevenue, 
+      estimatedProfit, 
+      filteredSales, 
+      shiftRevenue, 
+      shiftSales,
+      corporateStats 
+    };
+  }, [rooms, sales, reportDateRange, currentShift, reservations]);
 
   // Handlers
   const handleCheckIn = (guestData: Partial<Guest>, finalPayments: {method: Payment['method'], amount: number}[]) => {
     if (!selectedRoom) return;
+
+    const finalRoomPrice = parseFloat(priceOverride) || selectedRoom.price || 0;
 
     const cartItems = checkInCart.map(item => {
       const p = products.find(prod => prod.id === item.productId)!;
       return { ...item, product: p };
     });
 
-    const cartTotal = cartItems.reduce((acc, item) => acc + (item.product.price * item.quantity), 0);
-    const roomPrice = selectedRoom.price;
-    const totalToPay = roomPrice + cartTotal;
+    const cartTotal = cartItems.reduce((acc, item) => acc + ((item.isCourtesy ? 0 : item.product.price) * item.quantity), 0);
+    const totalToPay = (finalRoomPrice * stayDays) + cartTotal;
 
     const guestOrders: OrderItem[] = cartItems.map(item => ({
       productId: item.productId,
-      name: item.product.name,
+      name: item.product.name + (item.isCourtesy ? ' (Cortesía)' : ''),
       quantity: item.quantity,
-      price: item.product.price,
+      price: item.isCourtesy ? 0 : item.product.price,
+      isCourtesy: item.isCourtesy,
       cost: item.product.cost,
       timestamp: new Date().toISOString()
     }));
+
+    // Auto-Courtesy for Suites
+    if (selectedRoom.type === 'Suite') {
+      const wine = products.find(p => p.name.toLowerCase().includes('vino'));
+      if (wine) {
+        guestOrders.push({
+          productId: wine.id,
+          name: wine.name + ' (Cortesía Suite)',
+          quantity: 1,
+          price: 0,
+          isCourtesy: true,
+          cost: wine.cost,
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
 
     const paymentRecords: Payment[] = finalPayments.map(p => ({
       amount: p.amount,
@@ -187,9 +328,14 @@ export default function App() {
       documentNumber: guestData.documentNumber || '',
       roomId: selectedRoom.id,
       checkIn: new Date().toISOString(),
+      expectedCheckOut: guestData.expectedCheckOut,
+      companyName: guestData.companyName,
+      companyRuc: guestData.companyRuc,
       orders: guestOrders,
       payments: paymentRecords,
-      totalExpected: totalToPay
+      totalExpected: totalToPay,
+      overridePrice: parseFloat(priceOverride) || undefined,
+      priceChangeReason: checkInPriceReason || undefined
     };
 
     setGuests([...guests, newGuest]);
@@ -217,24 +363,24 @@ export default function App() {
     setSplitPayments([]);
     setIsSplitMode(false);
     setIsTicketOpen(true);
+    setPriceOverride('');
   };
 
-  const updateCheckInCart = (productId: string, delta: number) => {
+  const updateCheckInCart = (productId: string, delta: number, isCourtesy: boolean = false) => {
     setCheckInCart(prev => {
-      const existing = prev.find(i => i.productId === productId);
+      const existing = prev.find(i => i.productId === productId && i.isCourtesy === isCourtesy);
       if (existing) {
         const newQty = existing.quantity + delta;
-        if (newQty <= 0) return prev.filter(i => i.productId !== productId);
-        return prev.map(i => i.productId === productId ? { ...i, quantity: newQty } : i);
+        if (newQty <= 0) return prev.filter(i => !(i.productId === productId && i.isCourtesy === isCourtesy));
+        return prev.map(i => (i.productId === productId && i.isCourtesy === isCourtesy) ? { ...i, quantity: newQty } : i);
       }
-      if (delta > 0) return [...prev, { productId, quantity: delta }];
+      if (delta > 0) return [...prev, { productId, quantity: delta, isCourtesy }];
       return prev;
     });
   };
 
   const [isCheckoutPaymentOpen, setIsCheckoutPaymentOpen] = useState(false);
   const [pendingCheckoutData, setPendingCheckoutData] = useState<{roomId: string, guest: Guest, room: Room, balance: number} | null>(null);
-  const [shopCart, setShopCart] = useState<{productId: string, quantity: number}[]>([]);
   const [isReservationModalOpen, setIsReservationModalOpen] = useState(false);
   const [isStaySummaryOpen, setIsStaySummaryOpen] = useState(false);
   const [selectedCalendarDate, setSelectedCalendarDate] = useState(new Date());
@@ -248,6 +394,29 @@ export default function App() {
       guests.find(g => g.roomId === room.id)?.name.toLowerCase().includes(searchTerm.toLowerCase())
     );
   }, [rooms, searchTerm, guests]);
+
+  const handleCheckInFromReservation = (res: Reservation) => {
+    const room = rooms.find(r => r.id === res.roomId);
+    if (!room) return;
+    
+    setSelectedRoom(room);
+    setCheckInName(res.guestName);
+    setCheckInDocType(res.documentType || 'DNI');
+    setCheckInDocNum(res.documentNumber || '');
+    setCheckInCompany(res.companyName || '');
+    setCheckInCompanyRuc(res.companyRuc || '');
+    setCheckInDeposit(res.depositAmount || 0);
+    setIsCorporate(!!res.companyName);
+    
+    // Calculate stay days
+    const start = new Date(res.startDate);
+    const end = new Date(res.endDate);
+    const diff = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+    setStayDays(Math.max(1, diff));
+    
+    setIsReservationModalOpen(false);
+    setIsCheckInOpen(true);
+  };
 
   const handleUpdateReservation = (resData: Omit<Reservation, 'id'>) => {
     if (editingReservation) {
@@ -264,26 +433,29 @@ export default function App() {
   };
 
   const handleCancelReservation = (id: string) => {
-    if (confirm('¿Desea anular esta reserva?')) {
-      setReservations(reservations.filter(r => r.id !== id));
-      setIsReservationModalOpen(false);
-      setEditingReservation(null);
-    }
+    setReservations(reservations.filter(r => r.id !== id));
+    setIsReservationModalOpen(false);
+    setEditingReservation(null);
   };
 
   const handleProcessOrder = (payNow: boolean, finalPayments: {method: Payment['method'], amount: number}[]) => {
-    if (!selectedRoom || !selectedRoom.currentGuestId || shopCart.length === 0) return;
+    if (shopCart.length === 0) return;
 
-    const guest = guests.find(g => g.id === selectedRoom.currentGuestId);
-    if (!guest) return;
+    if (!payNow && !selectedRoom) {
+      alert("Para cargar a la cuenta debe seleccionar una habitación.");
+      return;
+    }
+
+    const guest = selectedRoom ? guests.find(g => g.id === selectedRoom.currentGuestId) : null;
 
     const newOrderItems: OrderItem[] = shopCart.map(item => {
       const product = products.find(p => p.id === item.productId)!;
       return {
         productId: item.productId,
-        name: product.name,
+        name: product.name + (item.isCourtesy ? ' (Cortesía)' : ''),
         quantity: item.quantity,
-        price: product.price,
+        price: item.isCourtesy ? 0 : product.price,
+        isCourtesy: item.isCourtesy,
         cost: product.cost,
         timestamp: new Date().toISOString()
       };
@@ -297,31 +469,56 @@ export default function App() {
       timestamp: new Date().toISOString()
     })) : [];
 
-    const updatedGuest = {
-      ...guest,
-      orders: [...guest.orders, ...newOrderItems],
-      payments: [...guest.payments, ...paymentRecords],
-      totalExpected: payNow ? guest.totalExpected : guest.totalExpected + totalAmount
-    };
-
-    setGuests(guests.map(g => g.id === guest.id ? updatedGuest : g));
-
-    if (payNow) {
+    if (guest && selectedRoom) {
+      const updatedGuest = {
+        ...guest,
+        orders: [...guest.orders, ...newOrderItems],
+        payments: [...guest.payments, ...paymentRecords],
+        totalExpected: payNow ? guest.totalExpected : guest.totalExpected + totalAmount
+      };
+      setGuests(guests.map(g => g.id === guest.id ? updatedGuest : g));
+      
+      if (payNow) {
+        const newSales: SaleRecord[] = finalPayments.map(p => ({
+          id: Math.random().toString(36).substr(2, 9),
+          timestamp: new Date().toISOString(),
+          guestName: guest.name,
+          roomNumber: selectedRoom.number,
+          amount: p.amount,
+          method: p.method,
+          type: 'Producto'
+        }));
+        setSales([...sales, ...newSales]);
+        newSales.forEach(s => updateShiftSales(s.amount));
+        
+        setCurrentTicket({ 
+          guest: { ...updatedGuest, orders: newOrderItems, payments: paymentRecords }, 
+          room: selectedRoom 
+        });
+        setIsTicketOpen(true);
+      }
+    } else {
+      // Direct Sale to Public
       const newSales: SaleRecord[] = finalPayments.map(p => ({
         id: Math.random().toString(36).substr(2, 9),
         timestamp: new Date().toISOString(),
-        guestName: guest.name,
-        roomNumber: selectedRoom.number,
+        guestName: 'VENTA DIRECTA',
+        roomNumber: 'N/A',
         amount: p.amount,
         method: p.method,
-        type: 'Producto'
+        type: 'General'
       }));
       setSales([...sales, ...newSales]);
       newSales.forEach(s => updateShiftSales(s.amount));
       
-      setCurrentTicket({ 
-        guest: { ...updatedGuest, orders: newOrderItems, payments: paymentRecords }, 
-        room: selectedRoom 
+      // Temporary Guest and Room for Ticket
+      setCurrentTicket({
+        guest: { 
+          id: 'SALE', name: 'VENTA DIRECTA', documentType: 'DNI', documentNumber: '00000000', 
+          roomId: 'SALE', checkIn: new Date().toISOString(), orders: newOrderItems, 
+          payments: paymentRecords, totalExpected: totalAmount 
+        },
+        room: { id: 'SALE', number: 'N/A', floor: 0, type: 'Simple', price: 0, status: 'available' }
       });
       setIsTicketOpen(true);
     }
@@ -332,15 +529,15 @@ export default function App() {
     setIsSplitMode(false);
   };
 
-  const updateShopCart = (productId: string, delta: number) => {
+  const updateShopCart = (productId: string, delta: number, isCourtesy: boolean = false) => {
     setShopCart(prev => {
-      const existing = prev.find(i => i.productId === productId);
+      const existing = prev.find(i => i.productId === productId && i.isCourtesy === isCourtesy);
       if (existing) {
         const newQty = existing.quantity + delta;
-        if (newQty <= 0) return prev.filter(i => i.productId !== productId);
-        return prev.map(i => i.productId === productId ? { ...i, quantity: newQty } : i);
+        if (newQty <= 0) return prev.filter(i => !(i.productId === productId && i.isCourtesy === isCourtesy));
+        return prev.map(i => (i.productId === productId && i.isCourtesy === isCourtesy) ? { ...i, quantity: newQty } : i);
       }
-      if (delta > 0) return [...prev, { productId, quantity: delta }];
+      if (delta > 0) return [...prev, { productId, quantity: delta, isCourtesy }];
       return prev;
     });
   };
@@ -360,9 +557,7 @@ export default function App() {
   };
 
   const handleDeleteProduct = (productId: string) => {
-    if (confirm('¿Está seguro de eliminar este producto?')) {
-      setProducts(products.filter(p => p.id !== productId));
-    }
+    setProducts(products.filter(p => p.id !== productId));
   };
   
   const handleSaveRoom = (roomData: Omit<Room, 'id'>) => {
@@ -379,6 +574,26 @@ export default function App() {
     setEditingRoom(null);
   };
 
+  const handleSaveRoomType = (typeData: Omit<RoomType, 'id'>) => {
+    if (editingRoomType) {
+      setRoomTypes(roomTypes.map(rt => rt.id === editingRoomType.id ? { ...typeData, id: rt.id } : rt));
+      // Update rooms that have this type name if name changed? 
+      // For simplicity let's assume names are unique and used as identifiers for now.
+    } else {
+      const newType: RoomType = {
+        ...typeData,
+        id: Math.random().toString(36).substr(2, 9)
+      };
+      setRoomTypes([...roomTypes, newType]);
+    }
+    setIsRoomTypeModalOpen(false);
+    setEditingRoomType(null);
+  };
+
+  const handleDeleteRoomType = (id: string) => {
+    setRoomTypes(roomTypes.filter(rt => rt.id !== id));
+  };
+
   const handleToggleRoomStatus = (roomId: string) => {
     setRooms(rooms.map(r => {
       if (r.id === roomId) {
@@ -389,9 +604,7 @@ export default function App() {
   };
 
   const handleDeleteRoom = (roomId: string) => {
-    if (confirm('¿Está seguro de eliminar esta habitación?')) {
-      setRooms(rooms.filter(r => r.id !== roomId));
-    }
+    setRooms(rooms.filter(r => r.id !== roomId));
   };
 
   const handleCheckOut = (roomId: string) => {
@@ -453,22 +666,21 @@ export default function App() {
   };
 
   const handleLogout = () => {
-    if (confirm('¿Desea cerrar el turno actual?')) {
-      setCurrentUser(null);
-      setCurrentShift(null);
-    }
+    setCurrentUser(null);
+    setCurrentShift(null);
   };
 
   if (!currentUser) {
-    return <LoginPortal onLogin={(user, cash) => {
+    return <LoginPortal hotelInfo={hotelInfo} onLogin={(user) => {
       setCurrentUser(user);
       setCurrentShift({
         id: Math.random().toString(36).substr(2, 9),
         userId: user.id,
         userName: user.name,
         startTime: new Date().toISOString(),
-        startingCash: cash,
-        totalSales: 0
+        startingCash: 0,
+        totalSales: 0,
+        isOpen: false
       });
     }} />;
   }
@@ -480,18 +692,20 @@ export default function App() {
         <div className="absolute top-0 right-0 w-64 h-64 -mr-32 -mt-32 bg-red-600/5 rounded-full blur-3xl pointer-events-none"></div>
         
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center text-white font-black text-2xl shadow-xl shadow-slate-900/20 transform hover:scale-110 transition-transform">H</div>
+          <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-slate-900/20 transform hover:scale-110 transition-transform">
+            <Star className="text-red-600 fill-red-600" size={24} />
+          </div>
           <div>
-            <h1 className="text-xl font-black tracking-tighter uppercase leading-none">InkaHotel <span className="text-red-600">Cloud</span></h1>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.4em] mt-1">Hospitality Elite v2.4</p>
+            <h1 className="text-xl font-black tracking-tighter uppercase leading-none">{hotelInfo.name.split(' ')[0]} <span className="text-red-600">{hotelInfo.name.split(' ').slice(1).join(' ')}</span></h1>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.4em] mt-1">Hospitality Management System</p>
           </div>
         </div>
 
         <nav className="hidden lg:flex items-center gap-1 bg-slate-50 p-1.5 rounded-2xl border border-slate-100">
           <NavHeaderItem active={activeTab === 'rooms'} onClick={() => setActiveTab('rooms')} label="Recepción" />
-          <NavHeaderItem active={activeTab === 'shop'} onClick={() => setActiveTab('shop')} label="Market" />
-          <NavHeaderItem active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} label="Auditoría" />
-          <NavHeaderItem active={activeTab === 'config'} onClick={() => setActiveTab('config')} label="Sistemas" />
+          <NavHeaderItem active={activeTab === 'inventory'} onClick={() => setActiveTab('inventory')} label="Inventario/Stock" />
+          <NavHeaderItem active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} label="Reportes" />
+          <NavHeaderItem active={activeTab === 'config'} onClick={() => setActiveTab('config')} label="Configuración" />
         </nav>
 
         <div className="flex items-center gap-6">
@@ -529,118 +743,182 @@ export default function App() {
           <AnimatePresence mode="wait">
             {activeTab === 'rooms' && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} key="rooms">
-                <div className="flex flex-col md:flex-row gap-6 mb-8 items-start md:items-center justify-between">
-                  <div className="flex flex-wrap items-center gap-4">
-                    <div className="relative w-full md:w-64">
-                      <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                      <input 
-                        type="text"
-                        placeholder="Buscar Hab. o Huésped..."
-                        className="w-full pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold shadow-sm focus:ring-2 focus:ring-red-600 outline-none transition-all"
-                        value={searchTerm}
-                        onChange={e => setSearchTerm(e.target.value)}
-                      />
-                    </div>
-
-                    <div className="flex bg-slate-100 p-1 rounded-xl gap-1 border border-slate-200 shadow-inner">
-                      <button 
-                        onClick={() => setRoomsViewMode('grid')}
-                        className={`px-6 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${roomsViewMode === 'grid' ? 'bg-white shadow-sm text-red-600' : 'text-slate-500 hover:bg-slate-200'}`}
-                      >
-                        <LayoutGrid size={16} /> Cuadrícula
-                      </button>
-                      <button 
-                        onClick={() => setRoomsViewMode('calendar')}
-                        className={`px-6 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${roomsViewMode === 'calendar' ? 'bg-white shadow-sm text-red-600' : 'text-slate-500 hover:bg-slate-200'}`}
-                      >
-                        <Calendar size={16} /> Calendario
-                      </button>
-                    </div>
-                    <div className="h-6 w-px bg-slate-200 hidden md:block"></div>
-                    <button 
-                      onClick={() => setIsReservationModalOpen(true)}
-                      className="px-6 py-3 bg-slate-900 text-white rounded-xl text-xs font-bold hover:bg-slate-800 transition-all shadow-lg shadow-slate-900/10 flex items-center gap-2"
+                {currentShift && !currentShift.isOpen ? (
+                  <div className="flex items-center justify-center min-h-[60vh]">
+                    <motion.div 
+                      initial={{ scale: 0.9, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      className="bg-white p-12 rounded-[3.5rem] shadow-2xl border border-slate-100 max-w-md w-full text-center relative overflow-hidden"
                     >
-                      <Plus size={16} /> Reservar
-                    </button>
-                  </div>
-
-                  <div className="flex items-center gap-6 text-[10px] font-black uppercase tracking-widest text-slate-500">
-                    <div className="flex items-center gap-2"><div className="w-3 h-3 bg-green-500 rounded-sm"></div> Libre</div>
-                    <div className="flex items-center gap-2"><div className="w-3 h-3 bg-red-500 rounded-sm"></div> Ocupado</div>
-                    <div className="flex items-center gap-2"><div className="w-3 h-3 bg-yellow-500 rounded-sm"></div> Limpieza</div>
-                    <div className="flex items-center gap-2"><div className="w-3 h-3 bg-blue-500 rounded-sm"></div> Reserva</div>
-                  </div>
-                </div>
-
-                {roomsViewMode === 'grid' ? (
-                  <div className="space-y-16 pb-20">
-                    {Array.from(new Set(filteredRooms.map(r => r.floor))).sort().map(floor => (
-                      <div key={`floor-group-${floor}`} className="relative">
-                        <div className="sticky top-0 z-[5] py-4 mb-8 bg-slate-50/95 backdrop-blur-sm border-b border-slate-200/50">
-                          <h3 className="text-xs font-black text-slate-900 uppercase tracking-[0.4em] flex items-center gap-6">
-                             <div className="flex items-center gap-2">
-                               <div className="w-1.5 h-6 bg-red-600 rounded-full"></div>
-                               <span className="text-slate-900 font-black">PISO {floor}</span>
-                             </div>
-                             <div className="flex-1 h-px bg-slate-200"></div>
-                             <span className="text-slate-400 font-bold tracking-widest">{filteredRooms.filter(r => r.floor === floor).length} UNIDADES</span>
-                          </h3>
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6">
-                          {filteredRooms.filter(r => r.floor === floor).map(room => (
-                            <RoomCard 
-                              key={`room-card-${room.id}`} 
-                              room={room} 
-                              guestName={guests.find(g => g.roomId === room.id)?.name}
-                              onCheckIn={() => { setSelectedRoom(room); setIsCheckInOpen(true); }}
-                              onShowSummary={() => { setSelectedRoom(room); setIsStaySummaryOpen(true); }}
-                              onAddOrder={() => { setSelectedRoom(room); setIsOrderOpen(true); }}
-                              onCheckOut={() => handleCheckOut(room.id)}
-                              onReady={(id) => setRooms(rooms.map(r => r.id === id ? { ...r, status: 'available' } : r))}
-                            />
-                          ))}
-                        </div>
+                      <div className="absolute top-0 right-0 w-32 h-32 -mr-16 -mt-16 bg-red-600/5 rounded-full blur-2xl"></div>
+                      <div className="w-20 h-20 bg-red-50 rounded-3xl flex items-center justify-center mx-auto mb-8 text-red-600">
+                        <Banknote size={40} />
                       </div>
-                    ))}
-                    {filteredRooms.length === 0 && (
-                      <div className="py-20 text-center">
-                        <p className="text-slate-400 font-bold">No se encontraron habitaciones.</p>
+                      <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tighter mb-4 italic">Apertura de Caja</h2>
+                      <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px] mb-10 leading-relaxed">
+                        Para iniciar las operaciones de recepción, es necesario registrar el fondo inicial de caja.
+                      </p>
+                      
+                      <div className="space-y-6">
+                        <div className="space-y-2 text-left">
+                          <label className="text-[10px] font-black uppercase text-slate-400 tracking-[0.3em] ml-4">Saldo Inicial (S/)</label>
+                          <input 
+                            type="number"
+                            autoFocus
+                            className="w-full px-8 py-5 bg-slate-50 border-2 border-slate-100 rounded-2xl text-2xl font-black text-slate-900 focus:border-red-600 outline-none transition-all shadow-inner"
+                            placeholder="0.00"
+                            value={startingCash}
+                            onChange={e => setStartingCash(e.target.value)}
+                          />
+                        </div>
+                        
+                        <button 
+                          onClick={() => {
+                            if (currentShift) {
+                              setCurrentShift({
+                                ...currentShift,
+                                startingCash: parseFloat(startingCash) || 0,
+                                isOpen: true
+                              });
+                            }
+                          }}
+                          className="w-full py-6 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-[0.4em] shadow-xl hover:bg-red-600 transition-all transform active:scale-95"
+                        >
+                          Abrir Recepción
+                        </button>
                       </div>
-                    )}
+                    </motion.div>
                   </div>
                 ) : (
-                  <CalendarView 
-                    rooms={rooms} 
-                    reservations={reservations} 
-                    onAddReservation={(roomId, date) => {
-                      setSelectedRoom(rooms.find(r => r.id === roomId) || null);
-                      setEditingReservation(null);
-                      setIsReservationModalOpen(true);
-                    }}
-                    onEditReservation={(res) => {
-                      setSelectedRoom(rooms.find(r => r.id === res.roomId) || null);
-                      setEditingReservation(res);
-                      setIsReservationModalOpen(true);
-                    }}
-                  />
+                  <>
+                    <div className="flex flex-col md:flex-row gap-6 mb-8 items-start md:items-center justify-between">
+                      <div className="flex flex-wrap items-center gap-4">
+                        <div className="relative w-full md:w-64">
+                          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                          <input 
+                            type="text"
+                            placeholder="Buscar Hab. o Huésped..."
+                            className="w-full pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold shadow-sm focus:ring-2 focus:ring-red-600 outline-none transition-all"
+                            value={searchTerm}
+                            onChange={e => setSearchTerm(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="flex bg-slate-100 p-1 rounded-xl gap-1 border border-slate-200 shadow-inner">
+                          <button 
+                            onClick={() => setRoomsViewMode('grid')}
+                            className={`px-6 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${roomsViewMode === 'grid' ? 'bg-white shadow-sm text-red-600' : 'text-slate-500 hover:bg-slate-200'}`}
+                          >
+                            <LayoutGrid size={16} /> Cuadrícula
+                          </button>
+                          <button 
+                            onClick={() => setRoomsViewMode('calendar')}
+                            className={`px-6 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${roomsViewMode === 'calendar' ? 'bg-white shadow-sm text-red-600' : 'text-slate-500 hover:bg-slate-200'}`}
+                          >
+                            <Calendar size={16} /> Calendario
+                          </button>
+                        </div>
+                        <div className="h-6 w-px bg-slate-200 hidden md:block"></div>
+                        <button 
+                          onClick={() => { setSelectedRoom(null); setIsOrderOpen(true); }}
+                          className="px-6 py-3 bg-red-600 text-white rounded-xl text-xs font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-900/10 flex items-center gap-2"
+                        >
+                          <ShoppingCart size={16} /> Venta Directa
+                        </button>
+                        <button 
+                          onClick={() => setIsReservationModalOpen(true)}
+                          className="px-6 py-3 bg-slate-900 text-white rounded-xl text-xs font-bold hover:bg-slate-800 transition-all shadow-lg shadow-slate-900/10 flex items-center gap-2"
+                        >
+                          <Plus size={16} /> Reservar
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-6 text-[10px] font-black uppercase tracking-widest text-slate-500">
+                        <div className="flex items-center gap-2"><div className="w-3 h-3 bg-green-500 rounded-sm"></div> Libre</div>
+                        <div className="flex items-center gap-2"><div className="w-3 h-3 bg-red-500 rounded-sm"></div> Ocupado</div>
+                        <div className="flex items-center gap-2"><div className="w-3 h-3 bg-yellow-500 rounded-sm"></div> Limpieza</div>
+                        <div className="flex items-center gap-2"><div className="w-3 h-3 bg-blue-500 rounded-sm"></div> Reserva</div>
+                      </div>
+                    </div>
+
+                    {roomsViewMode === 'grid' ? (
+                      <div className="space-y-16 pb-20">
+                        {Array.from(new Set(filteredRooms.map(r => r.floor))).sort().map(floor => (
+                          <div key={`floor-group-${floor}`} className="relative">
+                            <div className="sticky top-0 z-[5] py-4 mb-8 bg-slate-50/95 backdrop-blur-sm border-b border-slate-200/50">
+                              <h3 className="text-xs font-black text-slate-900 uppercase tracking-[0.4em] flex items-center gap-6">
+                                 <div className="flex items-center gap-2">
+                                   <div className="w-1.5 h-6 bg-red-600 rounded-full"></div>
+                                   <span className="text-slate-900 font-black">PISO {floor}</span>
+                                 </div>
+                                 <div className="flex-1 h-px bg-slate-200"></div>
+                                 <span className="text-slate-400 font-bold tracking-widest">{filteredRooms.filter(r => r.floor === floor).length} UNIDADES</span>
+                              </h3>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6">
+                              {filteredRooms.filter(r => r.floor === floor).map(room => (
+                                <RoomCard 
+                                  key={`room-card-${room.id}`} 
+                                  room={room} 
+                                  guestName={guests.find(g => g.roomId === room.id)?.name}
+                                  onCheckIn={() => { setSelectedRoom(room); setIsCheckInOpen(true); }}
+                                  onShowSummary={() => { setSelectedRoom(room); setIsStaySummaryOpen(true); }}
+                                  onAddOrder={() => { setSelectedRoom(room); setIsOrderOpen(true); }}
+                                  onCheckOut={() => handleCheckOut(room.id)}
+                                  onReady={(id) => setRooms(rooms.map(r => r.id === id ? { ...r, status: 'available' } : r))}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                        {filteredRooms.length === 0 && (
+                          <div className="py-20 text-center">
+                            <p className="text-slate-400 font-bold">No se encontraron habitaciones.</p>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <CalendarView 
+                        rooms={rooms} 
+                        reservations={reservations} 
+                        onAddReservation={(roomId, date) => {
+                          setSelectedRoom(rooms.find(r => r.id === roomId) || null);
+                          setEditingReservation(null);
+                          setIsReservationModalOpen(true);
+                        }}
+                        onEditReservation={(res) => {
+                          setSelectedRoom(rooms.find(r => r.id === res.roomId) || null);
+                          setEditingReservation(res);
+                          setIsReservationModalOpen(true);
+                        }}
+                      />
+                    )}
+                  </>
                 )}
               </motion.div>
             )}
 
-            {activeTab === 'shop' && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} key="shop" className="space-y-6">
+            {activeTab === 'inventory' && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} key="inventory" className="space-y-6">
                 <div className="flex justify-between items-center">
                    <div>
-                      <h2 className="text-2xl font-black uppercase tracking-tight">Gestión de Catálogo</h2>
-                      <p className="text-sm text-slate-500">Configure productos, precios, costos y stock.</p>
+                      <h2 className="text-2xl font-black uppercase tracking-tight">Gestión de Inventario</h2>
+                      <p className="text-sm text-slate-500">Supervise stock, costos y precios de productos.</p>
                    </div>
-                   <button 
-                    onClick={() => { setEditingProduct(null); setIsProductModalOpen(true); }}
-                    className="px-6 py-3 bg-red-600 text-white rounded-xl font-bold flex items-center gap-2 hover:bg-red-700 transition-all shadow-lg shadow-red-900/20"
-                   >
-                     <Plus size={20} /> Nuevo Producto
-                   </button>
+                   <div className="flex gap-3">
+                     <button 
+                      onClick={handleExportInventory}
+                      className="px-6 py-3 bg-slate-900 text-white rounded-xl font-bold flex items-center gap-2 hover:bg-slate-800 transition-all shadow-lg shadow-slate-900/10"
+                     >
+                       <FileText size={20} /> Exportar Inventario
+                     </button>
+                     <button 
+                      onClick={() => { setEditingProduct(null); setIsProductModalOpen(true); }}
+                      className="px-6 py-3 bg-red-600 text-white rounded-xl font-bold flex items-center gap-2 hover:bg-red-700 transition-all shadow-lg shadow-red-900/20"
+                     >
+                       <Plus size={20} /> Nuevo Producto
+                     </button>
+                   </div>
                 </div>
 
                 <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
@@ -699,7 +977,7 @@ export default function App() {
                             {currentUser?.avatar ? (
                               <img src={currentUser.avatar} alt="User" className="w-full h-full object-cover rounded-3xl" />
                             ) : (
-                              <User size={32} className="text-white" />
+                              <UserIcon size={32} className="text-white" />
                             )}
                          </div>
                          <div>
@@ -743,7 +1021,7 @@ export default function App() {
                 <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                   <div className="p-6 border-b border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-50/50">
                     <div>
-                      <h3 className="font-bold text-xl text-slate-800 uppercase tracking-tighter">Reporte de Ventas & Análisis</h3>
+                      <h3 className="font-bold text-xl text-slate-800 uppercase tracking-tighter">Reportes y Estadísticas Generales</h3>
                       <p className="text-xs text-slate-500">Filtrado desde {reportDateRange.start} hasta {reportDateRange.end}</p>
                     </div>
                     <div className="flex gap-2 w-full md:w-auto">
@@ -803,6 +1081,122 @@ export default function App() {
                     </div>
                   </div>
 
+                  <div className="p-8 bg-slate-50/50 border-t border-slate-100">
+                    <div className="flex justify-between items-center mb-8">
+                       <div>
+                          <h3 className="font-bold text-xl text-slate-800 uppercase tracking-tighter">Análisis Corporativo (Empresas)</h3>
+                          <p className="text-xs text-slate-500">Desempeño de huéspedes corporativos y convenios.</p>
+                       </div>
+                       <div className="flex gap-4">
+                          <div className="bg-white px-6 py-3 rounded-2xl border border-slate-200 shadow-sm">
+                             <p className="text-[10px] font-black uppercase text-slate-400">Total Empresas</p>
+                             <p className="text-xl font-black">{stats.corporateStats.length}</p>
+                          </div>
+                          <div className="bg-white px-6 py-3 rounded-2xl border border-slate-200 shadow-sm">
+                             <p className="text-[10px] font-black uppercase text-slate-400">Días Ocupados</p>
+                             <p className="text-xl font-black">{stats.corporateStats.reduce((acc: number, c: any) => acc + c.days, 0)}</p>
+                          </div>
+                       </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                       <div className="lg:col-span-2 bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                          <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-6">Días de Estancia por Empresa</h4>
+                          <div className="h-[300px] w-full">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <BarChart data={stats.corporateStats.slice(0, 8)}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                <XAxis 
+                                  dataKey="company" 
+                                  axisLine={false} 
+                                  tickLine={false} 
+                                  tick={{ fill: '#64748b', fontSize: 10, fontWeight: 700 }}
+                                />
+                                <YAxis 
+                                  axisLine={false} 
+                                  tickLine={false} 
+                                  tick={{ fill: '#64748b', fontSize: 10, fontWeight: 700 }}
+                                />
+                                <Tooltip 
+                                  contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontWeight: 'bold' }}
+                                />
+                                <Bar dataKey="days" radius={[6, 6, 0, 0]} fill="#ef4444" barSize={40} />
+                              </BarChart>
+                            </ResponsiveContainer>
+                          </div>
+                       </div>
+
+                       <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                          <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-6">Distribución de Ingresos</h4>
+                          <div className="h-[300px] w-full">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <PieChart>
+                                <Pie
+                                  data={stats.corporateStats.slice(0, 5)}
+                                  cx="50%"
+                                  cy="50%"
+                                  innerRadius={60}
+                                  outerRadius={80}
+                                  paddingAngle={5}
+                                  dataKey="revenue"
+                                  nameKey="company"
+                                >
+                                  {stats.corporateStats.map((entry: any, index: number) => (
+                                    <Cell key={`cell-${index}`} fill={['#ef4444', '#0f172a', '#3b82f6', '#10b981', '#f59e0b'][index % 5]} />
+                                  ))}
+                                </Pie>
+                                <Tooltip 
+                                  contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontWeight: 'bold' }}
+                                />
+                                <Legend verticalAlign="bottom" height={36} iconType="circle" />
+                              </PieChart>
+                            </ResponsiveContainer>
+                          </div>
+                       </div>
+                    </div>
+
+                    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                       <table className="w-full text-left">
+                          <thead className="bg-slate-50 border-b border-slate-200">
+                             <tr>
+                                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Razón Social / RUC</th>
+                                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 text-center">Reservas</th>
+                                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 text-center">Días Totales</th>
+                                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 text-right">Ingresos (S/)</th>
+                             </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                             {stats.corporateStats.length > 0 ? (
+                               stats.corporateStats.map((c: any) => (
+                                 <tr key={c.company} className="hover:bg-slate-50/50 transition-colors">
+                                    <td className="px-6 py-4">
+                                       <p className="font-bold text-slate-800">{c.company}</p>
+                                       <p className="text-[10px] font-medium text-slate-400">{c.ruc || 'Sin RUC'}</p>
+                                    </td>
+                                    <td className="px-6 py-4 text-center font-black text-slate-600">{c.stays}</td>
+                                    <td className="px-6 py-4 text-center">
+                                       <span className="px-3 py-1 bg-slate-100 rounded-full text-[10px] font-black text-slate-600">{c.days} DÍAS</span>
+                                    </td>
+                                    <td className="px-6 py-4 text-right font-black text-red-600">
+                                       S/ {c.revenue.toFixed(2)}
+                                    </td>
+                                 </tr>
+                               ))
+                             ) : (
+                               <tr>
+                                 <td colSpan={4} className="px-6 py-12 text-center">
+                                    <div className="flex flex-col items-center gap-2 opacity-30">
+                                       <Building2 size={40} />
+                                       <p className="text-sm font-black uppercase tracking-widest">Sin datos corporativos</p>
+                                    </div>
+                                 </td>
+                               </tr>
+                             )}
+                          </tbody>
+                       </table>
+                    </div>
+                  </div>
+
                   <div className="overflow-x-auto">
                     <table className="w-full text-left">
                       <thead>
@@ -852,21 +1246,169 @@ export default function App() {
             )}
             
             {activeTab === 'config' && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} key="config" className="space-y-8">
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} key="config" className="space-y-8 pb-20">
                 <div className="flex justify-between items-center">
                    <div>
-                      <h2 className="text-2xl font-black uppercase tracking-tight">Gestión de Habitaciones</h2>
-                      <p className="text-sm text-slate-500">Configure pisos, precios y estados de las habitaciones.</p>
+                      <h2 className="text-2xl font-black uppercase tracking-tight">Gestión del Hotel</h2>
+                      <p className="text-sm text-slate-500">Configure habitaciones, categorías y precios.</p>
                    </div>
-                   <button 
-                    onClick={() => { setEditingRoom(null); setIsRoomModalOpen(true); }}
-                    className="px-6 py-3 bg-red-600 text-white rounded-xl font-bold flex items-center gap-2 hover:bg-red-700 transition-all shadow-lg shadow-red-900/20"
-                   >
-                     <Plus size={20} /> Nueva Habitación
-                   </button>
                 </div>
 
-                <div className="space-y-8">
+                {/* Section: Hotel Information (Admin Only) */}
+                {currentUser?.role === 'admin' && (
+                  <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
+                    <div className="p-6 bg-slate-900 flex justify-between items-center">
+                      <div>
+                        <h3 className="font-black text-sm uppercase tracking-[0.2em] text-white">Información de la Empresa</h3>
+                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Datos visibles en perfiles y reportes</p>
+                      </div>
+                      <Building2 size={24} className="text-white/20" />
+                    </div>
+                    <div className="p-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase text-slate-400">Nombre Comercial</label>
+                        <div className="relative">
+                          <input 
+                            className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-red-600 outline-none transition-all font-bold text-sm" 
+                            value={hotelInfo.name}
+                            onChange={e => setHotelInfo({...hotelInfo, name: e.target.value})}
+                          />
+                          <Building2 size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                        </div>
+                      </div>
+                      <div className="space-y-1 lg:col-span-2">
+                        <label className="text-[10px] font-black uppercase text-slate-400">Dirección Fiscal / Local</label>
+                        <div className="relative">
+                          <input 
+                            className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-red-600 outline-none transition-all font-bold text-sm" 
+                            value={hotelInfo.address}
+                            onChange={e => setHotelInfo({...hotelInfo, address: e.target.value})}
+                          />
+                          <MapPin size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase text-slate-400">Teléfono Central</label>
+                        <div className="relative">
+                          <input 
+                            className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-red-600 outline-none transition-all font-bold text-sm" 
+                            value={hotelInfo.phone}
+                            onChange={e => setHotelInfo({...hotelInfo, phone: e.target.value})}
+                          />
+                          <Phone size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase text-slate-400">WhatsApp</label>
+                        <div className="relative">
+                          <input 
+                            className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-red-600 outline-none transition-all font-bold text-sm" 
+                            value={hotelInfo.whatsapp}
+                            onChange={e => setHotelInfo({...hotelInfo, whatsapp: e.target.value})}
+                          />
+                          <MessageCircle size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase text-slate-400">Facebook</label>
+                        <div className="relative">
+                          <input 
+                            className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-red-600 outline-none transition-all font-bold text-sm" 
+                            value={hotelInfo.facebook}
+                            onChange={e => setHotelInfo({...hotelInfo, facebook: e.target.value})}
+                          />
+                          <Facebook size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase text-slate-400">Instagram</label>
+                        <div className="relative">
+                          <input 
+                            className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-red-600 outline-none transition-all font-bold text-sm" 
+                            value={hotelInfo.instagram}
+                            onChange={e => setHotelInfo({...hotelInfo, instagram: e.target.value})}
+                          />
+                          <Instagram size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase text-slate-400">TikTok / Otros</label>
+                        <div className="relative">
+                          <input 
+                            className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-red-600 outline-none transition-all font-bold text-sm" 
+                            value={hotelInfo.tiktok}
+                            onChange={e => setHotelInfo({...hotelInfo, tiktok: e.target.value})}
+                          />
+                          <Smartphone size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Section: Room Types */}
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">Categorías de Habitación</h3>
+                    <button 
+                      onClick={() => { setEditingRoomType(null); setIsRoomTypeModalOpen(true); }}
+                      className="px-4 py-2 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-lg"
+                    >
+                      <Plus size={14} className="inline mr-1" /> Nueva Categoría
+                    </button>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {roomTypes.map(type => (
+                      <div key={type.id} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-red-200 transition-all group">
+                        <div className="flex justify-between items-start mb-4">
+                          <div className="w-12 h-12 bg-red-50 text-red-600 rounded-xl flex items-center justify-center">
+                            <Hotel size={24} />
+                          </div>
+                          <div className="flex gap-1">
+                            <button 
+                              onClick={() => { setEditingRoomType(type); setIsRoomTypeModalOpen(true); }}
+                              className="p-2 text-slate-300 hover:text-slate-900 transition-colors"
+                            >
+                              <Settings size={16} />
+                            </button>
+                            <button 
+                              onClick={() => handleDeleteRoomType(type.id)}
+                              className="p-2 text-slate-300 hover:text-red-600 transition-colors"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </div>
+                        <h4 className="font-black text-lg text-slate-900 uppercase tracking-tight mb-1">{type.name}</h4>
+                        <p className="text-xs text-slate-500 mb-4 line-clamp-2 min-h-[2.5rem]">{type.description || 'Sin descripción'}</p>
+                        <div className="flex justify-between items-center pt-4 border-t border-slate-50">
+                          <div>
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Precio Base</p>
+                            <p className="font-black text-slate-900">S/ {type.basePrice.toFixed(2)}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Capacidad</p>
+                            <p className="font-bold text-slate-700">{type.capacity} {type.capacity === 1 ? 'Persona' : 'Personas'}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="pt-8 border-t border-slate-100">
+                  <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">Inventario de Habitaciones</h3>
+                    <button 
+                      onClick={() => { setEditingRoom(null); setIsRoomModalOpen(true); }}
+                      className="px-6 py-3 bg-red-600 text-white rounded-xl font-bold flex items-center gap-2 hover:bg-red-700 transition-all shadow-lg shadow-red-900/20"
+                    >
+                      <Plus size={20} /> Nueva Habitación
+                    </button>
+                  </div>
+
+                  <div className="space-y-8">
                   {Array.from(new Set(rooms.map(r => r.floor))).sort().map(floor => (
                     <div key={`config-floor-${floor}`} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                       <div className="px-6 py-4 bg-slate-900 border-b border-slate-800 flex justify-between items-center text-white">
@@ -940,6 +1482,7 @@ export default function App() {
                       </div>
                     </div>
                   ))}
+                  </div>
                 </div>
               </motion.div>
             )}
@@ -962,7 +1505,7 @@ export default function App() {
                 <h3 className="text-xl font-bold flex items-center gap-2 uppercase tracking-tight">
                   <UserPlus className="text-red-600" /> Registro de Ingreso
                 </h3>
-                <button onClick={() => { setIsCheckInOpen(false); setCheckInCart([]); }} className="text-slate-400 hover:text-slate-600"><X /></button>
+                <button onClick={() => { setIsCheckInOpen(false); setCheckInCart([]); }} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
               </div>
               
               <div className="flex-1 overflow-hidden flex flex-col lg:flex-row">
@@ -981,11 +1524,21 @@ export default function App() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-left">
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Nombre del Huésped</label>
-                      <input id="guest-name" required className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-600 outline-none font-bold" placeholder="Apellidos y Nombres" />
+                      <input 
+                        required 
+                        className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-600 outline-none font-bold" 
+                        placeholder="Apellidos y Nombres" 
+                        value={checkInName}
+                        onChange={e => setCheckInName(e.target.value)}
+                      />
                     </div>
                     <div className="space-y-1.5 text-left">
                       <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Tipo de Doc.</label>
-                      <select id="guest-doc-type" className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-600 outline-none font-bold">
+                      <select 
+                        className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-600 outline-none font-bold"
+                        value={checkInDocType}
+                        onChange={e => setCheckInDocType(e.target.value as any)}
+                      >
                         <option>DNI</option>
                         <option>RUC</option>
                         <option>CE</option>
@@ -994,19 +1547,112 @@ export default function App() {
                     </div>
                     <div className="space-y-1.5 text-left">
                       <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">N° Documento</label>
-                      <input id="guest-doc-num" required className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-600 outline-none font-bold" placeholder="Documento" />
+                      <input 
+                        required 
+                        className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-600 outline-none font-bold" 
+                        placeholder="Documento" 
+                        value={checkInDocNum}
+                        onChange={e => setCheckInDocNum(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-slate-100">
+                    <div className="col-span-full">
+                      <button 
+                        onClick={() => setIsCorporate(!isCorporate)}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-xl border-2 transition-all font-black text-[10px] uppercase tracking-widest ${isCorporate ? 'bg-slate-900 border-slate-900 text-white' : 'bg-white border-slate-100 text-slate-400 hover:border-slate-200'}`}
+                      >
+                        <div className={`w-4 h-4 rounded-full border-2 border-current flex items-center justify-center`}>
+                          {isCorporate && <div className="w-2 h-2 rounded-full bg-white"></div>}
+                        </div>
+                        ¿Es Huésped de Empresa?
+                      </button>
+                    </div>
+
+                    {isCorporate && (
+                      <>
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Empresa (Razón Social)</label>
+                          <input 
+                            className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-600 outline-none font-bold" 
+                            placeholder="Razón Social" 
+                            value={checkInCompany}
+                            onChange={e => setCheckInCompany(e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">RUC Empresa</label>
+                          <input 
+                            className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-600 outline-none font-bold" 
+                            placeholder="20XXXXXXXXX" 
+                            value={checkInCompanyRuc}
+                            onChange={e => setCheckInCompanyRuc(e.target.value)}
+                          />
+                        </div>
+                      </>
+                    )}
+                    
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Salida Programada</label>
+                      <div className="bg-slate-900 text-white p-3 rounded-xl border border-slate-700 flex flex-col items-center justify-center">
+                        <p className="text-[10px] font-black uppercase opacity-60">Fecha y Hora de Salida</p>
+                        <p className="text-sm font-black tracking-tighter">
+                          {expectedCheckout.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' })} - {expectedCheckout.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Bloques (Stays)</label>
+                      <div className="flex items-center gap-3 bg-slate-50 p-1 rounded-xl border border-slate-200">
+                        <button 
+                          onClick={() => setStayDays(Math.max(1, stayDays - 1))}
+                          className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-lg text-lg font-black hover:bg-slate-50 active:scale-95 transition-all text-slate-600 shadow-sm"
+                        >-</button>
+                        <span className="flex-1 text-center font-black text-lg text-slate-800">{stayDays}</span>
+                        <button 
+                          onClick={() => setStayDays(stayDays + 1)}
+                          className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-lg text-lg font-black hover:bg-slate-50 active:scale-95 transition-all text-slate-600 shadow-sm"
+                        >+</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-slate-100">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Precio por Día Pactado (S/)</label>
+                      <input 
+                        id="override-price" 
+                        type="number" 
+                        className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-600 outline-none font-bold" 
+                        placeholder={selectedRoom?.price.toFixed(2)}
+                        value={priceOverride}
+                        onChange={(e) => setPriceOverride(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Motivo del Ajuste</label>
+                      <input 
+                        className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-red-600 outline-none font-bold italic" 
+                        placeholder="Ej: Tarifa Corporativa, descuento, etc." 
+                        value={checkInPriceReason}
+                        onChange={e => setCheckInPriceReason(e.target.value)}
+                      />
                     </div>
                   </div>
 
                   <div className="pt-4 border-t border-slate-100">
                     <div className="flex justify-between items-center mb-4">
                       <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Método de Pago Principal</label>
-                      <button 
-                        onClick={() => setIsSplitMode(!isSplitMode)} 
-                        className={`text-[10px] font-bold px-3 py-1 rounded-full transition-all ${isSplitMode ? 'bg-red-600 text-white' : 'bg-slate-100 text-slate-500'}`}
-                      >
-                        {isSplitMode ? '✓ Pago Combinado' : '+ Combinar Métodos'}
-                      </button>
+                      <div className="flex items-center gap-4">
+                        <button 
+                          onClick={() => setIsSplitMode(!isSplitMode)} 
+                          className={`text-[10px] font-bold px-3 py-1 rounded-full transition-all ${isSplitMode ? 'bg-red-600 text-white' : 'bg-slate-100 text-slate-500'}`}
+                        >
+                          {isSplitMode ? '✓ Pago Combinado' : '+ Combinar Métodos'}
+                        </button>
+                      </div>
                     </div>
                     
                     {!isSplitMode ? (
@@ -1055,7 +1701,7 @@ export default function App() {
                            <div className="text-right">
                               <p className="text-[9px] font-black text-slate-400 uppercase">Resta por Cobrar</p>
                               <p className="text-sm font-black text-red-600">
-                                S/ {Math.max(0, ((selectedRoom?.price || 0) + checkInCart.reduce((acc, i) => acc + (products.find(p => p.id === i.productId)!.price * i.quantity), 0)) - splitPayments.reduce((acc, p) => acc + p.amount, 0)).toFixed(2)}
+                               S/ {Math.max(0, (((parseFloat(priceOverride) || selectedRoom?.price || 0) * stayDays) + checkInCart.reduce((acc, i) => acc + ((i.isCourtesy ? 0 : products.find(p => p.id === i.productId)!.price) * i.quantity), 0)) - splitPayments.reduce((acc, p) => acc + p.amount, 0) - checkInDeposit).toFixed(2)}
                               </p>
                            </div>
                         </div>
@@ -1084,11 +1730,21 @@ export default function App() {
                           </div>
                           <div className="flex items-center gap-2 bg-slate-50 rounded-lg p-1">
                             {inCart ? (
-                              <>
-                                <button onClick={() => updateCheckInCart(product.id, -1)} className="w-6 h-6 flex items-center justify-center bg-white border border-slate-200 rounded-md text-slate-600 hover:bg-slate-100 font-bold">-</button>
-                                <span className="text-sm font-black w-4 text-center tabular-nums">{inCart.quantity}</span>
-                                <button onClick={() => updateCheckInCart(product.id, 1)} className="w-6 h-6 flex items-center justify-center bg-white border border-slate-200 rounded-md text-slate-600 hover:bg-slate-100 font-bold">+</button>
-                              </>
+                              <div className="flex flex-col items-end gap-2">
+                                <div className="flex items-center gap-2 bg-slate-50 rounded-lg p-1">
+                                  <button onClick={() => updateCheckInCart(product.id, -1, inCart.isCourtesy)} className="w-6 h-6 flex items-center justify-center bg-white border border-slate-200 rounded-md text-slate-600 hover:bg-slate-100 font-bold">-</button>
+                                  <span className="text-sm font-black w-4 text-center tabular-nums">{inCart.quantity}</span>
+                                  <button onClick={() => updateCheckInCart(product.id, 1, inCart.isCourtesy)} className="w-6 h-6 flex items-center justify-center bg-white border border-slate-200 rounded-md text-slate-600 hover:bg-slate-100 font-bold">+</button>
+                                </div>
+                                <button 
+                                  onClick={() => {
+                                    setCheckInCart(prev => prev.map(i => i.productId === product.id ? { ...i, isCourtesy: !i.isCourtesy } : i));
+                                  }}
+                                  className={`text-[8px] font-black uppercase px-2 py-0.5 rounded border transition-all ${inCart.isCourtesy ? 'bg-green-500 border-green-600 text-white' : 'bg-white border-slate-200 text-slate-400'}`}
+                                >
+                                  Cortesía
+                                </button>
+                              </div>
                             ) : (
                               <button onClick={() => updateCheckInCart(product.id, 1)} className="px-3 py-1 bg-slate-900 text-white rounded-md text-[10px] font-black uppercase tracking-tighter hover:bg-red-600 transition-colors">Añadir</button>
                             )}
@@ -1101,19 +1757,25 @@ export default function App() {
                   <div className="bg-slate-900 rounded-2xl p-5 text-white shadow-xl shadow-slate-900/20">
                     <div className="space-y-2 mb-4 text-[10px] font-black uppercase tracking-widest opacity-60">
                       <div className="flex justify-between">
-                        <span>Hospedaje</span>
-                        <span>S/ {selectedRoom?.price.toFixed(2)}</span>
+                        <span>Hospedaje ({stayDays} {stayDays === 1 ? 'Día' : 'Días'})</span>
+                        <span>S/ {((parseFloat(priceOverride) || selectedRoom?.price || 0) * stayDays).toFixed(2)}</span>
                       </div>
-                      <div className="flex justify-between border-b border-white/10 pb-2">
+                      <div className="flex justify-between italic">
                         <span>Venta Adicional</span>
-                        <span>S/ {checkInCart.reduce((acc, i) => acc + (products.find(p => p.id === i.productId)!.price * i.quantity), 0).toFixed(2)}</span>
+                        <span>S/ {checkInCart.reduce((acc, i) => acc + ((i.isCourtesy ? 0 : products.find(p => p.id === i.productId)!.price) * i.quantity), 0).toFixed(2)}</span>
                       </div>
+                      {checkInDeposit > 0 && (
+                        <div className="flex justify-between text-emerald-400 font-bold">
+                          <span>Adelanto Reserva</span>
+                          <span>- S/ {checkInDeposit.toFixed(2)}</span>
+                        </div>
+                      )}
                     </div>
                     <div className="flex justify-between items-end">
                       <div>
-                        <p className="text-xs font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Total a Cobrar</p>
+                        <p className="text-xs font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Total a Pagar Hoy</p>
                         <p className="text-3xl font-black tabular-nums">
-                          S/ {((selectedRoom?.price || 0) + checkInCart.reduce((acc, i) => acc + (products.find(p => p.id === i.productId)!.price * i.quantity), 0)).toFixed(2)}
+                          S/ {Math.max(0, (((parseFloat(priceOverride) || selectedRoom?.price || 0) * stayDays) + checkInCart.reduce((acc, i) => acc + ((i.isCourtesy ? 0 : products.find(p => p.id === i.productId)!.price) * i.quantity), 0)) - checkInDeposit).toFixed(2)}
                         </p>
                       </div>
                       <div className="text-right">
@@ -1125,29 +1787,74 @@ export default function App() {
               </div>
 
               <div className="p-6 bg-white border-t border-slate-100 flex gap-4 shrink-0 shadow-lg">
-                <button type="button" onClick={() => { setIsCheckInOpen(false); setCheckInCart([]); setSplitPayments([]); setIsSplitMode(false); }} className="flex-1 py-4 border-2 border-slate-200 rounded-xl font-black text-xs uppercase tracking-widest text-slate-600 hover:bg-slate-50 transition-all">Cancelar</button>
+                <button 
+                  type="button" 
+                  onClick={() => { 
+                    setIsCheckInOpen(false); 
+                    setCheckInCart([]); 
+                    setSplitPayments([]); 
+                    setIsSplitMode(false); 
+                    setStayDays(1); 
+                    setPriceOverride(''); 
+                    setCheckInName('');
+                    setCheckInDocType('DNI');
+                    setCheckInDocNum('');
+                    setCheckInCompany('');
+                    setCheckInCompanyRuc('');
+                    setCheckInDeposit(0);
+                    setCheckInPriceReason('');
+                  }} 
+                  className="flex-1 py-4 border-2 border-slate-200 rounded-xl font-black text-xs uppercase tracking-widest text-slate-600 hover:bg-slate-50 transition-all"
+                >
+                  Cancelar
+                </button>
                 <button 
                   type="button" 
                   onClick={() => {
-                    const guestName = (document.getElementById('guest-name') as HTMLInputElement)?.value;
-                    const docType = (document.getElementById('guest-doc-type') as HTMLSelectElement)?.value;
-                    const docNum = (document.getElementById('guest-doc-num') as HTMLInputElement)?.value;
-                    
-                    if (!guestName || !docNum) {
+                    if (!checkInName || !checkInDocNum) {
                       alert("Por favor complete los datos del huésped.");
                       return;
                     }
 
-                    const totalToPay = (selectedRoom?.price || 0) + checkInCart.reduce((acc, i) => acc + (products.find(p => p.id === i.productId)!.price * i.quantity), 0);
-                    const paymentsToProcess = isSplitMode ? splitPayments : [{ method: paymentMethod, amount: totalToPay }];
-                    const paidAmount = paymentsToProcess.reduce((acc, p) => acc + p.amount, 0);
+                    const finalRoomPrice = parseFloat(priceOverride) || selectedRoom?.price || 0;
+                    const totalToPay = (finalRoomPrice * stayDays) + checkInCart.reduce((acc, i) => acc + ((i.isCourtesy ? 0 : products.find(p => p.id === i.productId)!.price) * i.quantity), 0);
+                    
+                    // Subtract what was already paid as deposit if any
+                    const remainingToPay = totalToPay - checkInDeposit;
 
-                    if (paidAmount < totalToPay - 0.01) {
-                      alert(`Monto insuficiente. Faltan S/ ${(totalToPay - paidAmount).toFixed(2)}`);
+                    const paymentsToProcess = isSplitMode ? splitPayments : [{ method: paymentMethod, amount: Math.max(0, remainingToPay) }];
+                    const paidAmountNow = paymentsToProcess.reduce((acc, p) => acc + p.amount, 0);
+
+                    if (paidAmountNow < remainingToPay - 0.01 && remainingToPay > 0) {
+                      alert(`Monto insuficiente. Faltan S/ ${(remainingToPay - paidAmountNow).toFixed(2)}`);
                       return;
                     }
 
-                    handleCheckIn({ name: guestName, documentType: docType as any, documentNumber: docNum }, paymentsToProcess);
+                    // If they have a deposit, we should record it as a past payment possibly, 
+                    // or just handle it in the total paid.
+                    // For logic simplicity, we'll add the deposit as a payment if it exists.
+                    const allPayments = checkInDeposit > 0 
+                      ? [...paymentsToProcess, { amount: checkInDeposit, method: 'Efectivo', timestamp: new Date().toISOString() } as any] 
+                      : paymentsToProcess;
+
+                    handleCheckIn({ 
+                      name: checkInName, 
+                      documentType: checkInDocType as any, 
+                      documentNumber: checkInDocNum,
+                      companyName: checkInCompany,
+                      companyRuc: checkInCompanyRuc,
+                      expectedCheckOut: expectedCheckout.toISOString()
+                    }, allPayments);
+                    
+                    // Reset fields
+                    setStayDays(1);
+                    setCheckInName('');
+                    setCheckInDocType('DNI');
+                    setCheckInDocNum('');
+                    setCheckInCompany('');
+                    setCheckInCompanyRuc('');
+                    setCheckInDeposit(0);
+                    setCheckInPriceReason('');
                   }}
                   className="flex-[2] py-4 bg-red-600 text-white rounded-xl font-black text-xs uppercase tracking-[0.2em] hover:bg-red-700 shadow-xl shadow-red-100 transition-all flex items-center justify-center gap-3 active:scale-[0.98]"
                 >
@@ -1170,9 +1877,9 @@ export default function App() {
             >
               <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                 <h3 className="font-black text-xl uppercase tracking-tighter flex items-center gap-2">
-                  <ShoppingCart className="text-red-600" /> Venta de Productos - Hab {selectedRoom?.number}
+                  <ShoppingCart className="text-red-600" /> {selectedRoom ? `Venta de Productos - Hab ${selectedRoom.number}` : 'Venta Directa al Público'}
                 </h3>
-                <button onClick={() => { setIsOrderOpen(false); setShopCart([]); }} className="text-slate-400 hover:text-slate-600"><X /></button>
+                <button onClick={() => { setIsOrderOpen(false); setShopCart([]); }} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
               </div>
               <div className="flex flex-col lg:flex-row max-h-[70vh]">
                 {/* Catálogo de Productos */}
@@ -1238,7 +1945,17 @@ export default function App() {
                             <div key={item.productId} className="bg-white p-3 rounded-xl border border-slate-200 flex items-center justify-between group">
                               <div className="flex-1">
                                 <p className="text-xs font-bold text-slate-800 leading-tight">{p.name}</p>
-                                <p className="text-[10px] font-black text-red-600">S/ {(p.price * item.quantity).toFixed(2)}</p>
+                                <div className="flex items-center gap-2">
+                                  <p className="text-[10px] font-black text-red-600">S/ {( (item.isCourtesy ? 0 : p.price) * item.quantity).toFixed(2)}</p>
+                                  <button 
+                                    onClick={() => {
+                                      setShopCart(prev => prev.map(i => i.productId === item.productId && i.isCourtesy === item.isCourtesy ? { ...i, isCourtesy: !i.isCourtesy } : i));
+                                    }}
+                                    className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded border ${item.isCourtesy ? 'bg-green-500 border-green-600 text-white' : 'border-slate-200 text-slate-400'}`}
+                                  >
+                                    Cortesía
+                                  </button>
+                                </div>
                               </div>
                               <div className="flex items-center gap-2">
                                 <button onClick={() => updateShopCart(p.id, -1)} className="w-6 h-6 flex items-center justify-center bg-slate-100 rounded-md text-slate-600 hover:bg-slate-200 font-bold">-</button>
@@ -1268,7 +1985,7 @@ export default function App() {
                               <button 
                                 key={m}
                                 onClick={() => {
-                                  const total = shopCart.reduce((acc, i) => acc + (products.find(p => p.id === i.productId)!.price * i.quantity), 0);
+                                  const total = shopCart.reduce((acc, i) => acc + ((i.isCourtesy ? 0 : products.find(p => p.id === i.productId)!.price) * i.quantity), 0);
                                   handleProcessOrder(true, [{ method: m as any, amount: total }]);
                                 }}
                                 className="py-2 bg-white border border-slate-200 rounded-lg text-[9px] font-black uppercase tracking-tighter hover:border-red-600 hover:text-red-600 transition-all shadow-sm"
@@ -1301,7 +2018,7 @@ export default function App() {
                              ))}
                              <div className="pt-2 border-t border-slate-100 flex justify-between text-[9px] font-black uppercase">
                                 <span className="text-slate-400">Escrito: S/ {splitPayments.reduce((acc, p) => acc + p.amount, 0).toFixed(2)}</span>
-                                <span className="text-red-600">Falta: S/ {Math.max(0, shopCart.reduce((acc, i) => acc + (products.find(p => p.id === i.productId)!.price * i.quantity), 0) - splitPayments.reduce((acc, p) => acc + p.amount, 0)).toFixed(2)}</span>
+                                <span className="text-red-600">Falta: S/ {Math.max(0, shopCart.reduce((acc, i) => acc + ((i.isCourtesy ? 0 : products.find(p => p.id === i.productId)!.price) * i.quantity), 0) - splitPayments.reduce((acc, p) => acc + p.amount, 0)).toFixed(2)}</span>
                              </div>
                           </div>
                         )}
@@ -1311,11 +2028,11 @@ export default function App() {
                            <div className="flex justify-between items-end">
                               <div>
                                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Pedido</p>
-                                 <p className="text-xl font-black tabular-nums">S/ {shopCart.reduce((acc, i) => acc + (products.find(p => p.id === i.productId)!.price * i.quantity), 0).toFixed(2)}</p>
+                                 <p className="text-xl font-black tabular-nums">S/ {shopCart.reduce((acc, i) => acc + ((i.isCourtesy ? 0 : products.find(p => p.id === i.productId)!.price) * i.quantity), 0).toFixed(2)}</p>
                               </div>
                               <button 
                                 onClick={() => {
-                                  const total = shopCart.reduce((acc, i) => acc + (products.find(p => p.id === i.productId)!.price * i.quantity), 0);
+                                  const total = shopCart.reduce((acc, i) => acc + ((i.isCourtesy ? 0 : products.find(p => p.id === i.productId)!.price) * i.quantity), 0);
                                   if (!payNow) {
                                     handleProcessOrder(false, []);
                                   } else if (isSplitMode) {
@@ -1466,7 +2183,7 @@ export default function App() {
               <div className="ticket-printable border-2 border-dashed border-slate-200 p-8 rounded-xl bg-orange-50/20 text-slate-800">
                 <div className="text-center mb-6">
                   <Hotel className="mx-auto w-10 h-10 mb-2 text-slate-900" />
-                  <h4 className="font-black text-xl uppercase italic">IncaHotel</h4>
+                  <h4 className="font-black text-xl uppercase italic">Suite Estrella</h4>
                   <p className="text-xs font-bold opacity-60">RUC: 20123456789</p>
                   <p className="text-xs font-bold opacity-60">Cusco, Perú</p>
                 </div>
@@ -1569,8 +2286,22 @@ export default function App() {
             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
               <RoomFormModal 
                 room={editingRoom} 
+                roomTypes={roomTypes}
                 onSave={handleSaveRoom} 
                 onClose={() => { setIsRoomModalOpen(false); setEditingRoom(null); }} 
+              />
+            </motion.div>
+          </div>
+        )}
+
+        {/* Room Type Modal (Configuración CRUD) */}
+        {isRoomTypeModalOpen && (
+          <div key="modal-room-type" className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+              <RoomTypeFormModal 
+                roomType={editingRoomType} 
+                onSave={handleSaveRoomType} 
+                onClose={() => { setIsRoomTypeModalOpen(false); setEditingRoomType(null); }} 
               />
             </motion.div>
           </div>
@@ -1599,6 +2330,7 @@ export default function App() {
                 room={selectedRoom} 
                 reservation={editingReservation}
                 onSave={handleUpdateReservation} 
+                onCheckIn={handleCheckInFromReservation}
                 onCancel={handleCancelReservation}
                 onClose={() => { setIsReservationModalOpen(false); setSelectedRoom(null); setEditingReservation(null); }} 
               />
@@ -1695,10 +2427,21 @@ function ProductFormModal({ product, onSave, onClose }: { product: Product | nul
   );
 }
 
-function RoomFormModal({ room, onSave, onClose }: { room: Room | null, onSave: (r: Omit<Room, 'id'>) => void, onClose: () => void }) {
+function RoomFormModal({ room, roomTypes, onSave, onClose }: { room: Room | null, roomTypes: RoomType[], onSave: (r: Omit<Room, 'id'>) => void, onClose: () => void }) {
   const [formData, setFormData] = useState<Omit<Room, 'id'>>(
-    room ? { ...room } : { number: '', floor: 1, type: 'Simple', price: 60, status: 'available' }
+    room ? { ...room } : { number: '', floor: 1, type: roomTypes[0]?.name || 'Simple', price: roomTypes[0]?.basePrice || 60, status: 'available' }
   );
+
+  const handleTypeChange = (typeName: string) => {
+    const selectedType = roomTypes.find(rt => rt.name === typeName);
+    if (selectedType) {
+      setFormData({
+        ...formData,
+        type: typeName,
+        price: selectedType.basePrice
+      });
+    }
+  };
 
   return (
     <div className="flex flex-col">
@@ -1737,13 +2480,11 @@ function RoomFormModal({ room, onSave, onClose }: { room: Room | null, onSave: (
             <select 
               className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-red-600 outline-none transition-all font-bold uppercase"
               value={formData.type}
-              onChange={e => setFormData({...formData, type: e.target.value as any})}
+              onChange={e => handleTypeChange(e.target.value)}
             >
-              <option>Simple</option>
-              <option>Doble</option>
-              <option>Matrimonial</option>
-              <option>Triple</option>
-              <option>Suite</option>
+              {roomTypes.map(rt => (
+                <option key={rt.id} value={rt.name}>{rt.name}</option>
+              ))}
             </select>
           </div>
           <div className="space-y-1">
@@ -1784,7 +2525,77 @@ function RoomFormModal({ room, onSave, onClose }: { room: Room | null, onSave: (
   );
 }
 
-function CalendarView({ rooms, reservations, onAddReservation }: { rooms: Room[], reservations: Reservation[], onAddReservation: (roomId: string, date: string) => void }) {
+function RoomTypeFormModal({ roomType, onSave, onClose }: { roomType: RoomType | null, onSave: (rt: Omit<RoomType, 'id'>) => void, onClose: () => void }) {
+  const [formData, setFormData] = useState<Omit<RoomType, 'id'>>(
+    roomType ? { ...roomType } : { name: '', basePrice: 0, capacity: 1, description: '' }
+  );
+
+  return (
+    <div className="flex flex-col">
+      <div className="p-6 bg-slate-800 text-white flex justify-between items-center">
+        <div>
+           <h3 className="font-black text-xl uppercase tracking-tighter">{roomType ? 'Editar Tipo' : 'Nuevo Tipo de Habitación'}</h3>
+           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Categorías de Hospedaje</p>
+        </div>
+        <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-lg transition-colors"><X size={20} /></button>
+      </div>
+      <div className="p-8 space-y-4">
+        <div className="space-y-1">
+          <label className="text-[10px] font-black uppercase text-slate-400">Nombre de la Categoría</label>
+          <input 
+            autoFocus 
+            className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-red-600 outline-none transition-all font-bold" 
+            placeholder="Ej: Suite Deluxe"
+            value={formData.name}
+            onChange={e => setFormData({...formData, name: e.target.value})}
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-1">
+            <label className="text-[10px] font-black uppercase text-slate-400">Precio Base (S/)</label>
+            <input 
+              type="number" 
+              className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-red-600 outline-none transition-all font-bold" 
+              value={formData.basePrice || ''}
+              onChange={e => setFormData({...formData, basePrice: parseFloat(e.target.value)})}
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] font-black uppercase text-slate-400">Capacidad (Personas)</label>
+            <input 
+              type="number" 
+              className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-red-600 outline-none transition-all font-bold" 
+              value={formData.capacity || ''}
+              onChange={e => setFormData({...formData, capacity: parseInt(e.target.value)})}
+            />
+          </div>
+        </div>
+        <div className="space-y-1">
+          <label className="text-[10px] font-black uppercase text-slate-400">Descripción (Opcional)</label>
+          <textarea 
+            className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-red-600 outline-none transition-all font-bold text-sm" 
+            rows={3}
+            placeholder="Detalles adicionales sobre el tipo de habitación..."
+            value={formData.description}
+            onChange={e => setFormData({...formData, description: e.target.value})}
+          />
+        </div>
+      </div>
+      <div className="p-8 bg-slate-50 flex gap-3">
+        <button onClick={onClose} className="flex-1 py-4 text-sm font-bold text-slate-400 uppercase tracking-widest hover:text-slate-600 transition-colors">Cancelar</button>
+        <button 
+          onClick={() => onSave(formData)}
+          disabled={!formData.name}
+          className="flex-1 py-4 bg-red-600 text-white rounded-xl font-bold uppercase tracking-widest shadow-lg shadow-red-900/20 hover:bg-red-700 disabled:opacity-50 disabled:grayscale transition-all"
+        >
+          {roomType ? 'Guardar Cambios' : 'Crear Categoría'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CalendarView({ rooms, reservations, onAddReservation, onEditReservation }: { rooms: Room[], reservations: Reservation[], onAddReservation: (roomId: string, date: string) => void, onEditReservation: (res: Reservation) => void }) {
   const [currentDate, setCurrentDate] = useState(new Date());
   
   // Get days for the current week or month
@@ -1845,9 +2656,21 @@ function CalendarView({ rooms, reservations, onAddReservation }: { rooms: Room[]
                       onClick={() => onAddReservation(room.id, dateStr)}
                     >
                       {res && (
-                        <div className="absolute inset-0 m-1 bg-blue-500 text-white rounded-lg p-1.5 shadow-sm flex flex-col justify-center overflow-hidden">
-                          <p className="text-[8px] font-black uppercase leading-none opacity-80 mb-0.5 truncate">{res.guestName}</p>
-                          <p className="text-[7px] font-bold opacity-60 truncate">RESERVA</p>
+                        <div 
+                          className="absolute inset-0 m-1 bg-blue-600 text-white rounded-xl p-2 shadow-lg shadow-blue-900/20 flex flex-col justify-center overflow-hidden group/res"
+                          onClick={(e) => { e.stopPropagation(); onEditReservation(res); }}
+                        >
+                          <p className="text-[9px] font-black uppercase leading-tight truncate">{res.guestName}</p>
+                          {res.companyName && <p className="text-[7px] font-medium opacity-80 truncate">{res.companyName}</p>}
+                          <div className="flex justify-between items-center mt-1.5 pt-1 border-t border-white/10">
+                            <p className="text-[7px] font-black opacity-50 uppercase tracking-widest leading-none">Reserva</p>
+                            {res.depositAmount && res.depositAmount > 0 && (
+                              <div className="flex items-center gap-1">
+                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400"></div>
+                                <span className="text-[7px] font-black tabular-nums">S/ {res.depositAmount}</span>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -1862,20 +2685,29 @@ function CalendarView({ rooms, reservations, onAddReservation }: { rooms: Room[]
   );
 }
 
-function ReservationModal({ room, reservation, onSave, onCancel, onClose }: { 
+function ReservationModal({ room, reservation, onSave, onCheckIn, onCancel, onClose }: { 
   room: Room | null, 
   reservation: Reservation | null,
   onSave: (r: Omit<Reservation, 'id'>) => void, 
+  onCheckIn?: (r: Reservation) => void,
   onCancel?: (id: string) => void,
   onClose: () => void 
 }) {
   const [formData, setFormData] = useState<Omit<Reservation, 'id'>>({
     roomId: room?.id || reservation?.roomId || '',
     guestName: reservation?.guestName || '',
+    documentType: reservation?.documentType || 'DNI',
+    documentNumber: reservation?.documentNumber || '',
     startDate: reservation?.startDate || new Date().toISOString().split('T')[0],
     endDate: reservation?.endDate || new Date(Date.now() + 86400000).toISOString().split('T')[0],
-    status: reservation?.status || 'confirmed'
+    status: reservation?.status || 'confirmed',
+    companyName: reservation?.companyName || '',
+    companyRuc: reservation?.companyRuc || '',
+    depositAmount: reservation?.depositAmount || 0,
+    paymentMethod: reservation?.paymentMethod || 'Efectivo'
   });
+
+  const [isCorporate, setIsCorporate] = useState(!!reservation?.companyName);
 
   return (
     <div className="flex flex-col">
@@ -1886,20 +2718,47 @@ function ReservationModal({ room, reservation, onSave, onCancel, onClose }: {
         </div>
         <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-lg transition-colors"><X size={20} /></button>
       </div>
-      <div className="p-8 space-y-6">
-        <div className="space-y-1">
-          <label className="text-[10px] font-black uppercase text-slate-400">Nombre del Huésped</label>
-          <div className="relative">
-            <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+      <div className="p-8 space-y-6 overflow-y-auto max-h-[60vh]">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-1 md:col-span-2">
+            <label className="text-[10px] font-black uppercase text-slate-400">Nombre del Huésped</label>
+            <div className="relative">
+              <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+              <input 
+                autoFocus 
+                className="w-full pl-12 pr-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-red-600 outline-none transition-all font-bold" 
+                placeholder="Ej: Juan Perez"
+                value={formData.guestName}
+                onChange={e => setFormData({...formData, guestName: e.target.value})}
+              />
+            </div>
+          </div>
+          
+          <div className="space-y-1">
+            <label className="text-[10px] font-black uppercase text-slate-400">Tipo Documento</label>
+            <select 
+              className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-red-600 outline-none transition-all font-bold"
+              value={formData.documentType}
+              onChange={e => setFormData({...formData, documentType: e.target.value as any})}
+            >
+              <option>DNI</option>
+              <option>RUC</option>
+              <option>CE</option>
+              <option>Pasaporte</option>
+            </select>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[10px] font-black uppercase text-slate-400">N° Documento</label>
             <input 
-              autoFocus 
-              className="w-full pl-12 pr-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-red-600 outline-none transition-all font-bold" 
-              placeholder="Ej: Juan Perez"
-              value={formData.guestName}
-              onChange={e => setFormData({...formData, guestName: e.target.value})}
+              className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-red-600 outline-none transition-all font-bold" 
+              placeholder="00000000"
+              value={formData.documentNumber}
+              onChange={e => setFormData({...formData, documentNumber: e.target.value})}
             />
           </div>
         </div>
+
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-1">
             <label className="text-[10px] font-black uppercase text-slate-400">Fecha de Entrada</label>
@@ -1918,6 +2777,71 @@ function ReservationModal({ room, reservation, onSave, onCancel, onClose }: {
               value={formData.endDate}
               onChange={e => setFormData({...formData, endDate: e.target.value})}
             />
+          </div>
+        </div>
+
+        <div className="space-y-4 border-t border-slate-100 pt-6">
+          <button 
+            onClick={() => setIsCorporate(!isCorporate)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl border-2 transition-all font-black text-[10px] uppercase tracking-widest ${isCorporate ? 'bg-slate-900 border-slate-900 text-white' : 'bg-white border-slate-100 text-slate-400 hover:border-slate-200'}`}
+          >
+            <div className={`w-4 h-4 rounded-full border-2 border-current flex items-center justify-center`}>
+              {isCorporate && <div className="w-2 h-2 rounded-full bg-white"></div>}
+            </div>
+            ¿Es Reserva Corporativa?
+          </button>
+
+          {isCorporate && (
+            <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-2 duration-300">
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase text-slate-400">Empresa (Opcional)</label>
+                <input 
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-red-600 outline-none transition-all font-bold" 
+                  placeholder="Razón Social"
+                  value={formData.companyName}
+                  onChange={e => setFormData({...formData, companyName: e.target.value})}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase text-slate-400">RUC Empresa</label>
+                <input 
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-red-600 outline-none transition-all font-bold" 
+                  placeholder="20XXXXXXXXX"
+                  value={formData.companyRuc}
+                  onChange={e => setFormData({...formData, companyRuc: e.target.value})}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-slate-100 pt-6">
+          <div className="flex justify-between items-center mb-4">
+            <label className="text-[10px] font-black uppercase text-slate-400">Adelanto / Reserva (S/)</label>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <input 
+              type="number"
+              className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-red-600 outline-none transition-all font-bold text-lg" 
+              placeholder="0.00"
+              value={formData.depositAmount || ''}
+              onChange={e => setFormData({...formData, depositAmount: parseFloat(e.target.value) || 0})}
+            />
+            <div className="flex flex-wrap gap-2">
+              {(['Efectivo', 'Yape', 'Plin', 'Visa'] as const).map(m => (
+                <button
+                  key={m}
+                  onClick={() => setFormData({...formData, paymentMethod: m})}
+                  className={`px-3 py-2 rounded-lg border flex-1 text-[10px] font-black uppercase transition-all ${
+                    formData.paymentMethod === m 
+                      ? 'bg-slate-900 border-slate-900 text-white' 
+                      : 'bg-white border-slate-200 text-slate-400 hover:border-slate-300'
+                  }`}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -1941,6 +2865,14 @@ function ReservationModal({ room, reservation, onSave, onCancel, onClose }: {
         </div>
       </div>
       <div className="px-8 pb-8 bg-white flex flex-col gap-3">
+        {reservation && onCheckIn && reservation.status === 'confirmed' && (
+          <button 
+            onClick={() => onCheckIn(reservation)}
+            className="w-full py-4 bg-emerald-600 text-white rounded-xl font-bold uppercase tracking-[0.2em] shadow-lg shadow-emerald-900/20 hover:bg-emerald-700 transition-all flex items-center justify-center gap-3 mb-2"
+          >
+            <LogIn size={20} /> Procesar Check-In Ahora
+          </button>
+        )}
         <div className="flex gap-3">
           <button onClick={onClose} className="flex-1 py-4 text-sm font-bold text-slate-400 uppercase tracking-widest hover:text-slate-600 transition-colors">Cancelar</button>
           <button 
@@ -2035,8 +2967,8 @@ function StaySummaryModal({ room, guest, onAddOrder, onCheckOut, onClose }: { ro
   if (!guest) return null;
 
   const totalConsumption = guest.orders.reduce((acc, o) => acc + (o.price * o.quantity), 0);
-  const roomPrice = room.price; // Simplified for demo
-  const totalBalance = roomPrice + totalConsumption;
+  const totalBalance = guest.totalExpected;
+  const roomPriceSum = totalBalance - totalConsumption;
 
   return (
     <div className="flex flex-col max-h-[85vh]">
@@ -2056,7 +2988,7 @@ function StaySummaryModal({ room, guest, onAddOrder, onCheckOut, onClose }: { ro
       <div className="p-6 overflow-y-auto space-y-6">
         <div className="bg-slate-50 p-6 rounded-3xl border border-slate-200 flex flex-col items-center">
            <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center border-4 border-slate-100 shadow-sm mb-3">
-              <User className="text-slate-400" size={32} />
+              <UserIcon className="text-slate-400" size={32} />
            </div>
            <h4 className="text-xl font-black text-slate-900 uppercase tracking-tighter">{guest.name}</h4>
            <div className="flex items-center gap-2 mt-1">
@@ -2109,8 +3041,8 @@ function StaySummaryModal({ room, guest, onAddOrder, onCheckOut, onClose }: { ro
 
         <div className="bg-red-50 p-6 rounded-3xl border border-red-100">
            <div className="flex justify-between items-center text-xs font-bold text-red-600 uppercase tracking-widest mb-2">
-              <span>Hospedaje</span>
-              <span>S/ {roomPrice.toFixed(2)}</span>
+              <span>Hospedaje Total</span>
+              <span>S/ {roomPriceSum.toFixed(2)}</span>
            </div>
            <div className="flex justify-between items-center text-xs font-bold text-red-600 uppercase tracking-widest mb-4">
               <span>Extras/Tienda</span>
@@ -2167,7 +3099,7 @@ function RoomCard({ room, guestName, onCheckIn, onShowSummary, onAddOrder, onChe
       border: 'border-slate-900 shadow-xl shadow-slate-900/20',
       labelBg: 'bg-red-600 text-white',
       tag: 'Ocupado',
-      icon: <User className="text-white" size={20} />
+      icon: <UserIcon className="text-white" size={20} />
     },
     dirty: { 
       bg: 'bg-orange-50',
@@ -2271,182 +3203,97 @@ function RoomCard({ room, guestName, onCheckIn, onShowSummary, onAddOrder, onChe
   );
 }
 
-function LoginPortal({ onLogin }: { onLogin: (user: User, cash: number) => void }) {
-  const [selectedUser, setSelectedUser] = useState<User | null>(null);
-  const [passcode, setPasscode] = useState('');
-  const [startingCash, setStartingCash] = useState('0');
-  const [view, setView] = useState<'users' | 'access'>('users');
+function LoginPortal({ hotelInfo, onLogin }: { hotelInfo: HotelInfo, onLogin: (user: User) => void }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
 
-  const handleAccess = () => {
-    if (selectedUser) {
-      if (passcode.length < 4) {
-        alert("Ingrese su PIN de 4 dígitos");
-        return;
-      }
-      onLogin(selectedUser, parseFloat(startingCash) || 0);
+  const handleAccess = (e: React.FormEvent) => {
+    e.preventDefault();
+    const user = INITIAL_USERS.find(u => u.username === username && u.password === password);
+    
+    if (!user) {
+      setError('Credenciales incorrectas');
+      return;
     }
+    
+    setError('');
+    onLogin(user);
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900 flex items-center justify-center p-4 z-[100] overflow-hidden">
-      {/* Background elements */}
+    <div className="fixed inset-0 bg-slate-950 flex items-center justify-center p-4 z-[100] overflow-hidden">
+      {/* Background gradients */}
       <div className="absolute top-0 left-0 w-full h-full opacity-20 pointer-events-none">
-        <div className="absolute top-[10%] left-[10%] w-[40rem] h-[40rem] bg-red-600 rounded-full blur-[160px] animate-pulse"></div>
-        <div className="absolute bottom-[10%] right-[10%] w-[40rem] h-[40rem] bg-indigo-600 rounded-full blur-[160px] animate-pulse delay-1000"></div>
+        <div className="absolute top-1/4 left-1/4 w-[40rem] h-[40rem] bg-red-600 rounded-full blur-[160px] animate-pulse"></div>
+        <div className="absolute bottom-1/4 right-1/4 w-[40rem] h-[40rem] bg-indigo-600 rounded-full blur-[160px] animate-pulse delay-700"></div>
       </div>
 
       <motion.div 
-        initial={{ opacity: 0, scale: 0.9 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="w-full max-w-5xl bg-white rounded-[3.5rem] shadow-2xl overflow-hidden flex flex-col md:flex-row min-h-[650px] relative z-10 border border-white/10 backdrop-blur-3xl"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="w-full max-w-md relative z-10"
       >
-        {/* Left Side: Branding */}
-        <div className="w-full md:w-5/12 bg-slate-900 p-16 flex flex-col justify-between text-white relative">
-           <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-20"></div>
-           <div className="absolute inset-0 bg-gradient-to-br from-red-600/20 via-transparent to-indigo-600/20"></div>
-           
-           <div className="relative z-10">
-              <div className="w-20 h-20 bg-red-600 rounded-[2rem] flex items-center justify-center text-4xl font-black mb-10 shadow-2xl shadow-red-600/40 transform -rotate-6 hover:rotate-0 transition-transform">H</div>
-              <h1 className="text-5xl font-black uppercase italic tracking-tighter leading-tight">InkaHotel<br /><span className="text-red-500 underline decoration-8 underline-offset-[12px]">Cloud</span></h1>
-              <p className="text-slate-400 font-bold uppercase tracking-[0.4em] text-[10px] mt-12 bg-white/5 inline-block px-4 py-2 rounded-full">Elite Hospitality v2.4.0</p>
-           </div>
-           
-           <div className="relative z-10 space-y-8">
-              <div className="space-y-4">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
-                      <ShieldAlert className="text-red-500" size={24} />
-                  </div>
-                  <div>
-                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Security Node</p>
-                      <p className="text-sm font-bold">AES-256 Protocol Active</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
-                      <Clock className="text-indigo-400" size={24} />
-                  </div>
-                  <div>
-                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Service Uptime</p>
-                      <p className="text-sm font-bold">99.98% Network Status</p>
-                  </div>
-                </div>
-              </div>
-              <p className="text-[9px] font-black uppercase text-slate-600 tracking-[0.3em]">INKAHOTEL GLOBAL SYSTEMS GROUP</p>
-           </div>
-        </div>
+        <div className="bg-white/10 backdrop-blur-2xl border border-white/20 rounded-[3rem] p-12 shadow-2xl overflow-hidden relative group">
+          <div className="absolute top-0 right-0 w-32 h-32 -mr-16 -mt-16 bg-red-600/10 rounded-full blur-2xl group-hover:scale-125 transition-transform duration-700"></div>
+          
+          <div className="text-center mb-12">
+            <div className="w-20 h-20 bg-red-600 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-xl shadow-red-600/30 transform -rotate-6">
+               <Star className="text-white fill-white" size={40} />
+            </div>
+            <h1 className="text-4xl font-black text-white uppercase italic tracking-tighter leading-none mb-2">{hotelInfo.name.split(' ')[0]} <span className="text-red-500">{hotelInfo.name.split(' ').slice(1).join(' ')}</span></h1>
+            <p className="text-slate-400 font-bold uppercase tracking-[0.4em] text-[9px]">{hotelInfo.name}</p>
+          </div>
 
-        {/* Right Side: Login Content */}
-        <div className="w-full md:w-7/12 p-12 md:p-20 flex flex-col justify-center bg-white">
-          <AnimatePresence mode="wait">
-            {view === 'users' ? (
-              <motion.div 
-                key="users-view"
-                initial={{ opacity: 0, x: 40 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -40 }}
-                className="space-y-10"
-              >
-                <div>
-                   <h2 className="text-4xl font-black text-slate-900 uppercase tracking-tighter mb-2">Acceso de Estancia</h2>
-                   <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">Bienvenido al sistema. Seleccione su perfil para continuar.</p>
-                </div>
-
-                <div className="grid grid-cols-1 gap-5">
-                  {INITIAL_USERS.map((user) => (
-                    <button
-                      key={user.id}
-                      onClick={() => {
-                        setSelectedUser(user);
-                        setView('access');
-                      }}
-                      className="flex items-center gap-8 p-8 rounded-[2.5rem] bg-slate-50 border-2 border-transparent hover:border-red-600 hover:bg-white hover:shadow-2xl hover:shadow-slate-200 transition-all group relative overflow-hidden"
-                    >
-                      <div className="absolute top-0 right-0 w-32 h-32 -mr-16 -mt-16 bg-red-600/5 rounded-full blur-2xl group-hover:scale-150 transition-transform"></div>
-                      
-                      <div className="w-20 h-20 bg-slate-200 rounded-3xl overflow-hidden border-4 border-white flex items-center justify-center text-slate-400 group-hover:scale-110 transition-transform shadow-sm relative z-10">
-                        {user.avatar ? (
-                          <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" />
-                        ) : (
-                          <User size={40} />
-                        )}
-                      </div>
-                      <div className="text-left flex-1 relative z-10">
-                        <p className="text-2xl font-black text-slate-900 uppercase tracking-tighter group-hover:text-red-600 transition-colors uppercase italic">{user.name}</p>
-                        <p className="text-[11px] font-black uppercase tracking-[0.3em] text-slate-400 mt-1">{user.role === 'admin' ? 'Supervisión / ADM' : 'Operaciones / Recepción'}</p>
-                      </div>
-                      <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center text-slate-300 group-hover:text-red-600 group-hover:bg-red-50 transition-all relative z-10">
-                         <ChevronRight size={24} />
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </motion.div>
-            ) : (
-              <motion.div 
-                key="access-view"
-                initial={{ opacity: 0, x: 40 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -40 }}
-                className="space-y-10"
-              >
-                <div className="flex items-center gap-6">
-                  <button onClick={() => setView('users')} className="w-14 h-14 bg-slate-100 hover:bg-red-50 hover:text-red-600 rounded-2xl transition-all flex items-center justify-center text-slate-400">
-                    <ChevronLeft size={28} />
-                  </button>
-                  <div>
-                    <h2 className="text-4xl font-black text-slate-900 uppercase tracking-tighter leading-none italic">{selectedUser?.name}</h2>
-                    <p className="text-slate-400 font-bold uppercase tracking-widest text-[11px] mt-2">Configuración de sesión de turno</p>
-                  </div>
-                </div>
-
-                <div className="space-y-8">
-                  <div className="space-y-2">
-                    <label className="text-[11px] font-black uppercase text-slate-400 tracking-[0.3em] ml-4">Saldo Inicial de Caja</label>
-                    <div className="relative group">
-                      <div className="absolute left-6 top-1/2 -translate-y-1/2 flex items-center gap-3">
-                         <span className="text-slate-400 font-black text-xl">S/</span>
-                      </div>
-                      <input 
-                        type="number"
-                        autoFocus
-                        className="w-full pl-16 pr-8 py-6 bg-slate-50 border-2 border-slate-100 rounded-[2rem] text-3xl font-black text-slate-900 focus:border-red-600 bg-white shadow-inner outline-none transition-all"
-                        placeholder="0.00"
-                        value={startingCash}
-                        onChange={e => setStartingCash(e.target.value)}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[11px] font-black uppercase text-slate-400 tracking-[0.3em] ml-4">PIN de Seguridad (4 dígitos)</label>
-                    <div className="relative group">
-                      <div className="absolute left-6 top-1/2 -translate-y-1/2">
-                         <Clock className="text-slate-400" size={24} />
-                      </div>
-                      <input 
-                        type="password"
-                        maxLength={4}
-                        className="w-full pl-16 pr-8 py-6 bg-slate-50 border-2 border-slate-100 rounded-[2rem] text-3xl font-black text-slate-900 focus:border-red-600 bg-white shadow-inner outline-none tracking-[1em] transition-all"
-                        placeholder="••••"
-                        value={passcode}
-                        onChange={e => setPasscode(e.target.value)}
-                      />
-                    </div>
-                  </div>
-
-                  <button 
-                    onClick={handleAccess}
-                    className="w-full py-7 bg-slate-900 text-white rounded-[2.5rem] font-black text-sm uppercase tracking-[0.5em] shadow-2xl shadow-slate-900/30 hover:bg-red-600 hover:shadow-red-600/30 hover:scale-[1.02] active:scale-95 transition-all mt-4"
-                  >
-                    Iniciar Operaciones
-                  </button>
-                  
-                  <p className="text-center text-slate-400 font-bold text-[10px] uppercase tracking-widest px-10">Acceso restringido a personal autorizado. Todas las actividades son grabadas.</p>
-                </div>
+          <form onSubmit={handleAccess} className="space-y-6">
+            {error && (
+              <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="bg-red-500/10 border border-red-500/20 p-4 rounded-2xl flex items-center gap-3 text-red-400 font-bold text-[10px] uppercase tracking-widest">
+                <AlertTriangle size={16} /> {error}
               </motion.div>
             )}
-          </AnimatePresence>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase text-slate-400 tracking-[0.3em] ml-4">Usuario</label>
+              <div className="relative">
+                <UserIcon className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                <input 
+                  type="text" 
+                  required
+                  autoFocus
+                  className="w-full pl-14 pr-6 py-5 bg-white/5 border border-white/10 rounded-2xl text-white font-bold outline-none focus:border-red-600 focus:bg-white/10 transition-all placeholder:text-slate-600"
+                  placeholder="ID de Acceso"
+                  value={username}
+                  onChange={e => setUsername(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase text-slate-400 tracking-[0.3em] ml-4">Contraseña</label>
+              <div className="relative">
+                <ShieldAlert className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                <input 
+                  type="password" 
+                  required
+                  className="w-full pl-14 pr-6 py-5 bg-white/5 border border-white/10 rounded-2xl text-white font-bold outline-none focus:border-red-600 focus:bg-white/10 transition-all placeholder:text-slate-600 tracking-[0.5em]"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <button 
+              type="submit"
+              className="w-full py-6 bg-red-600 text-white rounded-2xl font-black text-xs uppercase tracking-[0.4em] shadow-xl shadow-red-600/20 hover:bg-red-500 hover:scale-[1.02] active:scale-95 transition-all mt-4"
+            >
+              Acceder al Sistema
+            </button>
+          </form>
+
+          <p className="mt-12 text-center text-[9px] font-black text-slate-500 uppercase tracking-widest">
+            Encriptación de Grado Bancario Activa
+          </p>
         </div>
       </motion.div>
     </div>
