@@ -870,7 +870,8 @@ export default function App() {
     const updatedGuest: Guest = {
       ...guest,
       checkOut: checkoutTime,
-      payments: [...guest.payments, ...paymentRecords]
+      payments: [...guest.payments, ...paymentRecords],
+      paymentTiming: 'now'
     };
 
     const newSales: SaleRecord[] = finalPayments.map(p => ({
