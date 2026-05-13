@@ -462,11 +462,13 @@ export default function App() {
       }
     }
 
-    const paymentRecords: Payment[] = finalPayments.map(p => ({
+    const paymentRecords: Payment[] = finalPayments.filter(p => p.method !== 'Pagar al Salir').map(p => ({
       amount: p.amount,
       method: p.method,
       timestamp: new Date().toISOString()
     }));
+
+    const paymentTiming = finalPayments.some(p => p.method === 'Pagar al Salir') ? 'checkout' : 'now';
 
     const newGuest: Guest = {
       id: Math.random().toString(36).substr(2, 9),
@@ -481,6 +483,7 @@ export default function App() {
       orders: guestOrders,
       payments: paymentRecords,
       totalExpected: totalToPay,
+      paymentTiming: paymentTiming,
       overridePrice: parseFloat(priceOverride) || undefined,
       priceChangeReason: checkInPriceReason || undefined
     };
@@ -2556,23 +2559,21 @@ export default function App() {
                 </div>
 
                 <div className="border-t-2 border-slate-900 pt-3 mb-6">
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-sm">TOTAL CUENTA</span>
+                    <span className="font-black text-lg">S/ {currentTicket.guest.totalExpected.toFixed(2)}</span>
+                  </div>
+                  
                   {currentTicket.guest.paymentTiming === 'checkout' ? (
-                    <div className="text-center p-4 bg-amber-100 rounded-lg">
-                      <span className="font-black text-amber-900 block uppercase text-sm">Pago Pendiente</span>
-                      <span className="font-bold text-amber-800 text-xs">Total: S/ {currentTicket.guest.totalExpected.toFixed(2)}</span>
-                      <span className="font-bold text-amber-800 text-xs block">A realizar al finalizar estadía</span>
+                    <div className="mt-2 text-center p-3 bg-red-100 border border-red-200 rounded-lg">
+                      <span className="font-black text-red-900 block uppercase text-[10px]">TOTAL PENDIENTE DE PAGO</span>
+                      <span className="font-bold text-red-800 text-lg block">S/ {currentTicket.guest.totalExpected.toFixed(2)}</span>
                     </div>
                   ) : (
-                    <>
-                      <div className="flex justify-between items-center">
-                        <span className="font-bold text-sm">TOTAL CUENTA</span>
-                        <span className="font-black text-lg">S/ {currentTicket.guest.totalExpected.toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between items-center opacity-70 text-[10px] font-bold">
-                        <span>PAGADO HASTA AHORA</span>
-                        <span>S/ {currentTicket.guest.payments.reduce((acc, p) => acc + p.amount, 0).toFixed(2)}</span>
-                      </div>
-                    </>
+                    <div className="flex justify-between items-center opacity-70 text-[10px] font-bold">
+                      <span>PAGADO HASTA AHORA</span>
+                      <span>S/ {currentTicket.guest.payments.reduce((acc, p) => acc + p.amount, 0).toFixed(2)}</span>
+                    </div>
                   )}
                 </div>
 
