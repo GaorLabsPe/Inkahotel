@@ -56,7 +56,7 @@ export interface OrderItem {
 
 export interface Payment {
   amount: number;
-  method: 'Efectivo' | 'Visa' | 'Mastercard' | 'Yape' | 'Plin';
+  method: 'Efectivo' | 'Visa' | 'Mastercard' | 'Yape' | 'Plin' | 'Pagar al Salir';
   timestamp: string;
 }
 
@@ -76,6 +76,7 @@ export interface Guest {
   totalExpected: number;
   overridePrice?: number;
   priceChangeReason?: string;
+  paymentTiming?: 'now' | 'checkout';
 }
 
 export interface Reservation {
@@ -91,6 +92,7 @@ export interface Reservation {
   companyRuc?: string;
   depositAmount?: number;
   paymentMethod?: Payment['method'];
+  paymentTiming?: 'now' | 'checkout';
 }
 
 export interface Room {

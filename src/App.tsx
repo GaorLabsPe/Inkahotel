@@ -566,7 +566,7 @@ export default function App() {
     setCheckInDocNum(res.documentNumber || '');
     setCheckInCompany(res.companyName || '');
     setCheckInCompanyRuc(res.companyRuc || '');
-    setCheckInDeposit(res.depositAmount || 0);
+    setCheckInDeposit(res.paymentTiming === 'checkout' ? 0 : (res.depositAmount || 0));
     setIsCorporate(!!res.companyName);
     
     // Calculate stay days
@@ -1114,6 +1114,7 @@ export default function App() {
                                   key={`room-card-${room.id}`} 
                                   room={room} 
                                   guestName={guests.find(g => g.roomId === room.id)?.name}
+                                  paymentTiming={reservations.find(r => r.roomId === room.id && r.status === 'checked-in')?.paymentTiming}
                                   onCheckIn={() => { setSelectedRoom(room); setIsCheckInOpen(true); }}
                                   onShowSummary={() => { setSelectedRoom(room); setIsStaySummaryOpen(true); }}
                                   onAddOrder={() => { setSelectedRoom(room); setIsOrderOpen(true); }}
@@ -1985,8 +1986,8 @@ export default function App() {
                     </div>
                     
                     {!isSplitMode ? (
-                      <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-                        {['Efectivo', 'Yape', 'Plin', 'Visa', 'Mastercard'].map(m => (
+                      <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+                        {['Efectivo', 'Yape', 'Plin', 'Visa', 'Mastercard', 'Pagar al Salir'].map(m => (
                           <button 
                             key={`pay-method-1-${m}`}
                             onClick={() => setPaymentMethod(m as any)}
@@ -2555,14 +2556,24 @@ export default function App() {
                 </div>
 
                 <div className="border-t-2 border-slate-900 pt-3 mb-6">
-                  <div className="flex justify-between items-center">
-                    <span className="font-bold text-sm">TOTAL CUENTA</span>
-                    <span className="font-black text-lg">S/ {currentTicket.guest.totalExpected.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between items-center opacity-70 text-[10px] font-bold">
-                    <span>PAGADO HASTA AHORA</span>
-                    <span>S/ {currentTicket.guest.payments.reduce((acc, p) => acc + p.amount, 0).toFixed(2)}</span>
-                  </div>
+                  {currentTicket.guest.paymentTiming === 'checkout' ? (
+                    <div className="text-center p-4 bg-amber-100 rounded-lg">
+                      <span className="font-black text-amber-900 block uppercase text-sm">Pago Pendiente</span>
+                      <span className="font-bold text-amber-800 text-xs">Total: S/ {currentTicket.guest.totalExpected.toFixed(2)}</span>
+                      <span className="font-bold text-amber-800 text-xs block">A realizar al finalizar estadía</span>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex justify-between items-center">
+                        <span className="font-bold text-sm">TOTAL CUENTA</span>
+                        <span className="font-black text-lg">S/ {currentTicket.guest.totalExpected.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between items-center opacity-70 text-[10px] font-bold">
+                        <span>PAGADO HASTA AHORA</span>
+                        <span>S/ {currentTicket.guest.payments.reduce((acc, p) => acc + p.amount, 0).toFixed(2)}</span>
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 <div className="text-center">
@@ -3054,6 +3065,7 @@ function ReservationModal({ room, reservation, onSave, onCheckIn, onCancel, onCl
   });
 
   const [isCorporate, setIsCorporate] = useState(!!reservation?.companyName);
+  const [paymentOption, setPaymentOption] = useState<'now' | 'checkout'>('now');
 
   return (
     <div className="flex flex-col">
@@ -3161,35 +3173,56 @@ function ReservationModal({ room, reservation, onSave, onCheckIn, onCancel, onCl
           )}
         </div>
 
+        {/* --- ADD PAYMENT TIMING OPTION --- */}
         <div className="border-t border-slate-100 pt-6">
-          <div className="flex justify-between items-center mb-4">
-            <label className="text-[10px] font-black uppercase text-slate-400">Adelanto / Reserva (S/)</label>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <input 
-              type="number"
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-red-600 outline-none transition-all font-bold text-lg" 
-              placeholder="0.00"
-              value={formData.depositAmount || ''}
-              onChange={e => setFormData({...formData, depositAmount: parseFloat(e.target.value) || 0})}
-            />
-            <div className="flex flex-wrap gap-2">
-              {(['Efectivo', 'Yape', 'Plin', 'Visa'] as const).map(m => (
-                <button
-                  key={m}
-                  onClick={() => setFormData({...formData, paymentMethod: m})}
-                  className={`px-3 py-2 rounded-lg border flex-1 text-[10px] font-black uppercase transition-all ${
-                    formData.paymentMethod === m 
-                      ? 'bg-slate-900 border-slate-900 text-white' 
-                      : 'bg-white border-slate-200 text-slate-400 hover:border-slate-300'
-                  }`}
-                >
-                  {m}
-                </button>
-              ))}
-            </div>
+          <label className="text-[10px] font-black uppercase text-slate-400 mb-4 block">Momento de Pago</label>
+          <div className="flex gap-3">
+             <button
+               onClick={() => setPaymentOption('now')}
+               className={`flex-1 py-3 rounded-xl border-2 font-black text-[10px] uppercase transition-all ${paymentOption === 'now' ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-100 bg-slate-50 text-slate-400'}`}
+             >
+               Pagar Ahora (Check-in)
+             </button>
+             <button
+               onClick={() => setPaymentOption('checkout')}
+               className={`flex-1 py-3 rounded-xl border-2 font-black text-[10px] uppercase transition-all ${paymentOption === 'checkout' ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-100 bg-slate-50 text-slate-400'}`}
+             >
+               Pagar al Checkout
+             </button>
           </div>
         </div>
+
+        {paymentOption === 'now' && (
+          <div className="border-t border-slate-100 pt-6">
+            <div className="flex justify-between items-center mb-4">
+              <label className="text-[10px] font-black uppercase text-slate-400">Adelanto / Reserva (S/)</label>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <input 
+                type="number"
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-red-600 outline-none transition-all font-bold text-lg" 
+                placeholder="0.00"
+                value={formData.depositAmount || ''}
+                onChange={e => setFormData({...formData, depositAmount: parseFloat(e.target.value) || 0})}
+              />
+              <div className="flex flex-wrap gap-2">
+                {(['Efectivo', 'Yape', 'Plin', 'Visa'] as const).map(m => (
+                  <button
+                    key={m}
+                    onClick={() => setFormData({...formData, paymentMethod: m})}
+                    className={`px-3 py-2 rounded-lg border flex-1 text-[10px] font-black uppercase transition-all ${
+                      formData.paymentMethod === m 
+                        ? 'bg-slate-900 border-slate-900 text-white' 
+                        : 'bg-white border-slate-200 text-slate-400 hover:border-slate-300'
+                    }`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="space-y-1">
           <label className="text-[10px] font-black uppercase text-slate-400">Estado</label>
@@ -3213,16 +3246,16 @@ function ReservationModal({ room, reservation, onSave, onCheckIn, onCancel, onCl
       <div className="px-8 pb-8 bg-white flex flex-col gap-3">
         {reservation && onCheckIn && reservation.status === 'confirmed' && (
           <button 
-            onClick={() => onCheckIn(reservation)}
+            onClick={() => onCheckIn({ ...reservation, paymentTiming: paymentOption })}
             className="w-full py-4 bg-emerald-600 text-white rounded-xl font-bold uppercase tracking-[0.2em] shadow-lg shadow-emerald-900/20 hover:bg-emerald-700 transition-all flex items-center justify-center gap-3 mb-2"
           >
-            <LogIn size={20} /> Procesar Check-In Ahora
+            <LogIn size={20} /> Procesar Check-In ({paymentOption === 'now' ? 'Paga Ahora' : 'Paga Checkout'})
           </button>
         )}
         <div className="flex gap-3">
           <button onClick={onClose} className="flex-1 py-4 text-sm font-bold text-slate-400 uppercase tracking-widest hover:text-slate-600 transition-colors">Cancelar</button>
           <button 
-            onClick={() => onSave(formData)}
+            onClick={() => onSave({ ...formData, paymentTiming: paymentOption })}
             disabled={!formData.guestName}
             className="flex-[2] py-4 bg-red-600 text-white rounded-xl font-bold uppercase tracking-widest shadow-lg shadow-red-900/20 hover:bg-red-700 disabled:opacity-50 transition-all"
           >
@@ -3429,9 +3462,10 @@ interface RoomCardProps {
   onAddOrder: () => void;
   onCheckOut: () => void;
   onReady: (id: string) => void;
+  paymentTiming?: 'now' | 'checkout';
 }
 
-function RoomCard({ room, guestName, onCheckIn, onShowSummary, onAddOrder, onCheckOut, onReady }: RoomCardProps) {
+function RoomCard({ room, guestName, onCheckIn, onShowSummary, onAddOrder, onCheckOut, onReady, paymentTiming }: RoomCardProps) {
   const statusStyles: Record<RoomStatus, any> = {
     available: { 
       bg: 'bg-white',
@@ -3490,6 +3524,11 @@ function RoomCard({ room, guestName, onCheckIn, onShowSummary, onAddOrder, onChe
             <div className={`px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-widest ${style.labelBg}`}>
               {style.tag}
             </div>
+            {paymentTiming === 'checkout' && (
+              <div className="px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-widest bg-amber-500 text-white">
+                Pagar Checkout
+              </div>
+            )}
           </div>
           <p className={`text-[10px] font-black uppercase tracking-[0.2em] opacity-40`}>{room.type}</p>
         </div>
@@ -3505,6 +3544,11 @@ function RoomCard({ room, guestName, onCheckIn, onShowSummary, onAddOrder, onChe
                <p className="text-[10px] font-black uppercase tracking-widest opacity-40">Huésped</p>
                <p className="text-sm font-black truncate leading-tight">{guestName}</p>
             </div>
+            {paymentTiming === 'checkout' && (
+              <div className="px-3 py-2 rounded-xl bg-amber-500/20 border border-amber-500/30">
+                <p className="text-[9px] font-black uppercase text-amber-100 italic">Pago al checkout</p>
+              </div>
+            )}
             <div className="flex items-center gap-4">
                <div className="flex items-center gap-1.5">
                   <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></div>
